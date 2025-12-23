@@ -1,7 +1,7 @@
 use crate::client::ApiClient;
 use crate::error::Result;
 use crate::utils::base64::encode_base64url_string;
-use super::types::{Message, SendMessageRequest};
+use super::types::Message;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 
 pub struct ComposeParams {
@@ -10,13 +10,28 @@ pub struct ComposeParams {
     pub body: String,
     pub from: Option<String>,
     pub cc: Option<String>,
+    /// Message-ID of parent message (for replies)
+    pub in_reply_to: Option<String>,
+    /// Space-separated Message-IDs of thread history (for replies)
+    pub references: Option<String>,
+    /// Gmail thread ID (for replies)
+    pub thread_id: Option<String>,
 }
 
 pub async fn send_message(client: &ApiClient, params: ComposeParams) -> Result<Message> {
     let raw_email = build_raw_email(&params);
     let encoded = encode_base64url_string(&raw_email);
 
-    let request = SendMessageRequest { raw: encoded };
+    // Include threadId for replies to maintain threading
+    let request = if let Some(ref thread_id) = params.thread_id {
+        serde_json::json!({
+            "raw": encoded,
+            "threadId": thread_id
+        })
+    } else {
+        serde_json::json!({ "raw": encoded })
+    };
+
     client.post("/users/me/messages/send", &request).await
 }
 
@@ -24,11 +39,17 @@ pub async fn create_draft(client: &ApiClient, params: ComposeParams) -> Result<s
     let raw_email = build_raw_email(&params);
     let encoded = encode_base64url_string(&raw_email);
 
-    let request = serde_json::json!({
-        "message": {
-            "raw": encoded
-        }
-    });
+    // Include threadId for reply drafts to maintain threading
+    let message = if let Some(ref thread_id) = params.thread_id {
+        serde_json::json!({
+            "raw": encoded,
+            "threadId": thread_id
+        })
+    } else {
+        serde_json::json!({ "raw": encoded })
+    };
+
+    let request = serde_json::json!({ "message": message });
     client.post("/users/me/drafts", &request).await
 }
 
@@ -58,6 +79,16 @@ fn build_raw_email(params: &ComposeParams) -> String {
         email.push_str(&format!("Cc: {}\r\n", sanitize_header(cc)));
     }
 
+    // Add In-Reply-To header for replies (RFC 5322)
+    if let Some(ref in_reply_to) = params.in_reply_to {
+        email.push_str(&format!("In-Reply-To: {}\r\n", sanitize_header(in_reply_to)));
+    }
+
+    // Add References header for threading (RFC 5322)
+    if let Some(ref references) = params.references {
+        email.push_str(&format!("References: {}\r\n", sanitize_header(references)));
+    }
+
     // Sanitize and add Subject header (RFC 2047 encode if non-ASCII)
     let subject = sanitize_header(&params.subject);
     if subject.is_ascii() {
@@ -74,6 +105,74 @@ fn build_raw_email(params: &ComposeParams) -> String {
     email.push_str(&params.body);
 
     email
+}
+
+/// Metadata extracted from an original message for constructing a reply
+pub struct ReplyMetadata {
+    /// Recipient for the reply (Reply-To or From of original)
+    pub to: String,
+    /// Cc recipients for reply-all (original To + Cc)
+    pub cc: Option<String>,
+    /// Subject with "Re: " prefix if not already present
+    pub subject: String,
+    /// Message-ID of the original message
+    pub in_reply_to: String,
+    /// Thread history (original References + Message-ID)
+    pub references: String,
+    /// Gmail thread ID
+    pub thread_id: String,
+}
+
+/// Extract metadata from an original message needed to construct a reply
+pub fn extract_reply_metadata(message: &Message) -> Option<ReplyMetadata> {
+    let payload = message.payload.as_ref()?;
+    let headers = &payload.headers;
+
+    // Helper to get header value by name (case-insensitive)
+    let get = |name: &str| -> Option<String> {
+        headers.iter()
+            .find(|h| h.name.eq_ignore_ascii_case(name))
+            .map(|h| h.value.clone())
+    };
+
+    // Get reply-to address (prefer Reply-To, fall back to From)
+    let to = get("Reply-To").or_else(|| get("From"))?;
+
+    // Get subject, add "Re: " prefix if not already present
+    let original_subject = get("Subject").unwrap_or_default();
+    let subject = if original_subject.to_lowercase().starts_with("re:") {
+        original_subject
+    } else {
+        format!("Re: {}", original_subject)
+    };
+
+    // Get Message-ID for In-Reply-To header
+    let message_id = get("Message-ID")?;
+
+    // Build References: original References (if any) + Message-ID
+    let references = match get("References") {
+        Some(refs) => format!("{} {}", refs, message_id),
+        None => message_id.clone(),
+    };
+
+    // For reply-all: combine original To and Cc recipients
+    let original_to = get("To");
+    let original_cc = get("Cc");
+    let cc = match (original_to, original_cc) {
+        (Some(t), Some(c)) => Some(format!("{}, {}", t, c)),
+        (Some(t), None) => Some(t),
+        (None, Some(c)) => Some(c),
+        (None, None) => None,
+    };
+
+    Some(ReplyMetadata {
+        to,
+        cc,
+        subject,
+        in_reply_to: message_id,
+        references,
+        thread_id: message.thread_id.clone(),
+    })
 }
 
 /// Sanitize header values to prevent header injection attacks

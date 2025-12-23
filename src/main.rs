@@ -267,6 +267,31 @@ enum GmailCommands {
         #[arg(long)]
         archive: bool,
     },
+    /// Reply to a message
+    Reply {
+        /// Message ID to reply to
+        id: String,
+        /// Reply body (or use --body-file)
+        #[arg(long)]
+        body: Option<String>,
+        /// Read body from file
+        #[arg(long)]
+        body_file: Option<String>,
+        /// Reply-all (include Cc recipients)
+        #[arg(long)]
+        all: bool,
+    },
+    /// Create a draft reply to a message
+    ReplyDraft {
+        /// Message ID to reply to
+        id: String,
+        /// Reply body
+        #[arg(long)]
+        body: Option<String>,
+        /// Reply-all (include Cc recipients)
+        #[arg(long)]
+        all: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -724,6 +749,9 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         body: body_content,
                         from: None,
                         cc: None,
+                        in_reply_to: None,
+                        references: None,
+                        thread_id: None,
                     };
 
                     match workspace_cli::commands::gmail::send::send_message(&client, params).await {
@@ -751,6 +779,9 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         body: body_content,
                         from: None,
                         cc: None,
+                        in_reply_to: None,
+                        references: None,
+                        thread_id: None,
                     };
 
                     match workspace_cli::commands::gmail::send::create_draft(&client, params).await {
@@ -860,6 +891,113 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     match workspace_cli::commands::gmail::labels::modify_labels(&client, &id, add, remove).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                GmailCommands::Reply { id, body, body_file, all } => {
+                    // Fetch original message to get headers
+                    let original = match workspace_cli::commands::gmail::get::get_message(&client, &id, "metadata").await {
+                        Ok(msg) => msg,
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"Failed to fetch original message: {}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    // Extract reply metadata
+                    let metadata = match workspace_cli::commands::gmail::send::extract_reply_metadata(&original) {
+                        Some(m) => m,
+                        None => {
+                            eprintln!(r#"{{"status":"error","message":"Could not extract reply metadata from message (missing Message-ID or From header)"}}"#);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    // Get reply body
+                    let body_content = if let Some(file_path) = body_file {
+                        match std::fs::read_to_string(&file_path) {
+                            Ok(content) => content,
+                            Err(e) => {
+                                eprintln!(r#"{{"status":"error","message":"Failed to read body file: {}"}}"#, e);
+                                std::process::exit(1);
+                            }
+                        }
+                    } else {
+                        body.unwrap_or_default()
+                    };
+
+                    // Build ComposeParams with reply fields
+                    let params = workspace_cli::commands::gmail::send::ComposeParams {
+                        to: metadata.to,
+                        subject: metadata.subject,
+                        body: body_content,
+                        from: None,
+                        cc: if all { metadata.cc } else { None },
+                        in_reply_to: Some(metadata.in_reply_to),
+                        references: Some(metadata.references),
+                        thread_id: Some(metadata.thread_id),
+                    };
+
+                    match workspace_cli::commands::gmail::send::send_message(&client, params).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                GmailCommands::ReplyDraft { id, body, all } => {
+                    // Fetch original message to get headers
+                    let original = match workspace_cli::commands::gmail::get::get_message(&client, &id, "metadata").await {
+                        Ok(msg) => msg,
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"Failed to fetch original message: {}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    // Extract reply metadata
+                    let metadata = match workspace_cli::commands::gmail::send::extract_reply_metadata(&original) {
+                        Some(m) => m,
+                        None => {
+                            eprintln!(r#"{{"status":"error","message":"Could not extract reply metadata from message (missing Message-ID or From header)"}}"#);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    // Build ComposeParams with reply fields
+                    let params = workspace_cli::commands::gmail::send::ComposeParams {
+                        to: metadata.to,
+                        subject: metadata.subject,
+                        body: body.unwrap_or_default(),
+                        from: None,
+                        cc: if all { metadata.cc } else { None },
+                        in_reply_to: Some(metadata.in_reply_to),
+                        references: Some(metadata.references),
+                        thread_id: Some(metadata.thread_id),
+                    };
+
+                    match workspace_cli::commands::gmail::send::create_draft(&client, params).await {
                         Ok(response) => {
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;

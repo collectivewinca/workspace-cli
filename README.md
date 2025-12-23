@@ -8,7 +8,7 @@ High-performance Google Workspace CLI optimized for AI agent integration.
 
 ## Features
 
-- **Gmail**: List, read, send, draft, delete, trash/untrash, labels management, and modify messages
+- **Gmail**: List, read, send, draft, reply, delete, trash/untrash, labels management, and modify messages
 - **Drive**: List, upload, download, delete, trash/untrash, mkdir, move, copy, rename, share, and manage permissions
 - **Calendar**: List, create, update, and delete events with sync token support
 - **Docs**: Read documents as Markdown, append content, create documents, and find/replace text
