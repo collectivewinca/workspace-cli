@@ -8,12 +8,12 @@ High-performance Google Workspace CLI optimized for AI agent integration.
 
 ## Features
 
-- **Gmail**: List, read, send, and draft emails with advanced filtering
-- **Drive**: List, upload, download, and manage files
+- **Gmail**: List, read, send, draft, delete, trash/untrash, labels management, and modify messages
+- **Drive**: List, upload, download, delete, trash/untrash, mkdir, move, copy, rename, share, and manage permissions
 - **Calendar**: List, create, update, and delete events with sync token support
-- **Docs**: Read documents as Markdown and append content
-- **Sheets**: Read and write spreadsheet data with A1 notation support
-- **Slides**: Extract text from presentations
+- **Docs**: Read documents as Markdown, append content, create documents, and find/replace text
+- **Sheets**: Read, write, append, create spreadsheets, and clear ranges
+- **Slides**: Get presentations, extract text, and access individual slides
 - **Tasks**: Manage task lists and individual tasks
 
 ### Key Capabilities
@@ -143,6 +143,30 @@ workspace-cli gmail send \
 
 # Filter by label
 workspace-cli gmail list --label "INBOX" --limit 20
+
+# List all labels
+workspace-cli gmail labels
+
+# Move message to trash
+workspace-cli gmail trash <message-id>
+
+# Restore message from trash
+workspace-cli gmail untrash <message-id>
+
+# Permanently delete a message
+workspace-cli gmail delete <message-id>
+
+# Mark message as read
+workspace-cli gmail modify <message-id> --mark-read
+
+# Mark message as unread and star it
+workspace-cli gmail modify <message-id> --mark-unread --star
+
+# Archive a message (remove from inbox)
+workspace-cli gmail modify <message-id> --archive
+
+# Add/remove labels
+workspace-cli gmail modify <message-id> --add-labels "Label1,Label2" --remove-labels "INBOX"
 ```
 
 ### Drive Examples
@@ -150,6 +174,9 @@ workspace-cli gmail list --label "INBOX" --limit 20
 ```bash
 # List all files
 workspace-cli drive list --limit 10
+
+# List files in a specific folder
+workspace-cli drive list --parent <folder-id>
 
 # Search for specific files
 workspace-cli drive list --query "name contains 'report'" --limit 5
@@ -168,6 +195,42 @@ workspace-cli drive download <file-id> --output ./downloaded-file.pdf
 
 # Get file metadata
 workspace-cli drive get <file-id>
+
+# Create a folder
+workspace-cli drive mkdir "New Folder"
+
+# Create folder in specific parent
+workspace-cli drive mkdir "Subfolder" --parent <folder-id>
+
+# Move a file to a different folder
+workspace-cli drive move <file-id> --to <folder-id>
+
+# Copy a file
+workspace-cli drive copy <file-id> --name "Copy of file"
+
+# Rename a file
+workspace-cli drive rename <file-id> "new-name.pdf"
+
+# Move file to trash
+workspace-cli drive trash <file-id>
+
+# Restore file from trash
+workspace-cli drive untrash <file-id>
+
+# Permanently delete a file
+workspace-cli drive delete <file-id>
+
+# Share file with a user
+workspace-cli drive share <file-id> --email user@example.com --role writer
+
+# Make file public (anyone with link)
+workspace-cli drive share <file-id> --anyone --role reader
+
+# List file permissions
+workspace-cli drive permissions <file-id>
+
+# Remove a permission
+workspace-cli drive unshare <file-id> <permission-id>
 ```
 
 ### Calendar Examples
@@ -210,15 +273,30 @@ workspace-cli docs get <doc-id> --markdown
 # Get raw document JSON
 workspace-cli docs get <doc-id>
 
+# Create a new document
+workspace-cli docs create "My New Document"
+
 # Append text to document
 workspace-cli docs append <doc-id> "New paragraph content"
+
+# Find and replace text in document
+workspace-cli docs replace <doc-id> --find "old text" --with "new text"
+
+# Case-sensitive find and replace
+workspace-cli docs replace <doc-id> --find "OldText" --with "NewText" --match-case
 ```
 
 ### Sheets Examples
 
 ```bash
+# Create a new spreadsheet
+workspace-cli sheets create "My Spreadsheet"
+
 # Read spreadsheet range
 workspace-cli sheets get <sheet-id> --range "Sheet1!A1:C10"
+
+# Read as CSV format
+workspace-cli sheets get <sheet-id> --range "Sheet1!A1:C10" --format csv
 
 # Update spreadsheet values
 workspace-cli sheets update <sheet-id> \
@@ -229,6 +307,9 @@ workspace-cli sheets update <sheet-id> \
 workspace-cli sheets append <sheet-id> \
   --range "Sheet1!A1" \
   --values '[["Bob","25"],["Carol","28"]]'
+
+# Clear a range of cells
+workspace-cli sheets clear <sheet-id> --range "Sheet1!A1:C10"
 ```
 
 ### Slides Examples
@@ -365,6 +446,11 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 | `gmail get` | Get a specific message | `--decode-body` |
 | `gmail send` | Send an email | `--to`, `--subject`, `--body`, `--body-file` |
 | `gmail draft` | Create a draft | `--to`, `--subject`, `--body` |
+| `gmail delete` | Permanently delete message | None |
+| `gmail trash` | Move message to trash | None |
+| `gmail untrash` | Restore message from trash | None |
+| `gmail labels` | List all labels | None |
+| `gmail modify` | Modify message labels | `--add-labels`, `--remove-labels`, `--mark-read`, `--mark-unread`, `--star`, `--unstar`, `--archive` |
 
 ### Drive Commands
 
@@ -374,6 +460,16 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 | `drive get` | Get file metadata | None |
 | `drive upload` | Upload a file | `--parent`, `--name` |
 | `drive download` | Download a file | `--output` |
+| `drive delete` | Permanently delete file | None |
+| `drive trash` | Move file to trash | None |
+| `drive untrash` | Restore file from trash | None |
+| `drive mkdir` | Create a folder | `--parent` |
+| `drive move` | Move file to folder | `--to` |
+| `drive copy` | Copy a file | `--name`, `--parent` |
+| `drive rename` | Rename a file | None |
+| `drive share` | Share a file | `--email`, `--anyone`, `--role` |
+| `drive permissions` | List file permissions | None |
+| `drive unshare` | Remove a permission | None |
 
 ### Calendar Commands
 
@@ -389,15 +485,19 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 | Command | Description | Key Options |
 |---------|-------------|-------------|
 | `docs get` | Get document content | `--markdown` |
+| `docs create` | Create a new document | None |
 | `docs append` | Append text to document | None |
+| `docs replace` | Find and replace text | `--find`, `--with`, `--match-case` |
 
 ### Sheets Commands
 
 | Command | Description | Key Options |
 |---------|-------------|-------------|
 | `sheets get` | Get spreadsheet values | `--range` |
+| `sheets create` | Create a new spreadsheet | `--sheets` |
 | `sheets update` | Update spreadsheet values | `--range`, `--values` |
 | `sheets append` | Append rows to spreadsheet | `--range`, `--values` |
+| `sheets clear` | Clear a range of cells | `--range` |
 
 ### Slides Commands
 
@@ -668,11 +768,11 @@ For issues, questions, or contributions:
 
 ## Roadmap
 
-- [ ] Implement remaining commands (Drive upload/download, Docs append, etc.)
+- [x] ~~Implement remaining commands~~ (All core commands implemented!)
+- [x] ~~Extended field filtering~~ (`--fields` flag for JSON field selection)
 - [ ] Model Context Protocol (MCP) server mode
 - [ ] Batch operations for bulk processing
 - [ ] Webhook support for real-time notifications
-- [ ] Extended field filtering and transformations
 - [ ] Performance benchmarks and optimizations
 
 ---
