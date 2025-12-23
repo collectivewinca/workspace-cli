@@ -2,6 +2,7 @@ use crate::client::ApiClient;
 use crate::error::Result;
 use crate::utils::base64::encode_base64url_string;
 use super::types::{Message, SendMessageRequest};
+use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 
 pub struct ComposeParams {
     pub to: String,
@@ -57,8 +58,15 @@ fn build_raw_email(params: &ComposeParams) -> String {
         email.push_str(&format!("Cc: {}\r\n", sanitize_header(cc)));
     }
 
-    // Sanitize and add Subject header
-    email.push_str(&format!("Subject: {}\r\n", sanitize_header(&params.subject)));
+    // Sanitize and add Subject header (RFC 2047 encode if non-ASCII)
+    let subject = sanitize_header(&params.subject);
+    if subject.is_ascii() {
+        email.push_str(&format!("Subject: {}\r\n", subject));
+    } else {
+        // RFC 2047 encoded-word: =?charset?encoding?encoded_text?=
+        let encoded = BASE64_STANDARD.encode(subject.as_bytes());
+        email.push_str(&format!("Subject: =?UTF-8?B?{}?=\r\n", encoded));
+    }
 
     email.push_str("MIME-Version: 1.0\r\n");
     email.push_str("Content-Type: text/plain; charset=utf-8\r\n");
