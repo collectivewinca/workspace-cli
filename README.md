@@ -15,6 +15,7 @@ High-performance Google Workspace CLI optimized for AI agent integration.
 - **Sheets**: Read, write, append, create spreadsheets, and clear ranges
 - **Slides**: Get presentations, extract text, and access individual slides
 - **Tasks**: Manage task lists and individual tasks
+- **Batch**: Execute up to 100 API requests in a single HTTP call for maximum efficiency
 
 ### Key Capabilities
 
@@ -355,6 +356,59 @@ workspace-cli tasks update <task-id> --complete
 workspace-cli tasks delete <task-id>
 ```
 
+### Batch Examples
+
+Execute multiple API requests in a single HTTP call for maximum efficiency:
+
+```bash
+# Batch Gmail requests - get multiple messages at once
+workspace-cli batch gmail --requests '[
+  {"id":"msg1","method":"GET","path":"/gmail/v1/users/me/messages/abc123"},
+  {"id":"msg2","method":"GET","path":"/gmail/v1/users/me/messages/def456"}
+]'
+
+# Batch Gmail requests - modify multiple messages
+workspace-cli batch gmail --requests '[
+  {"id":"star1","method":"POST","path":"/gmail/v1/users/me/messages/abc123/modify","body":{"addLabelIds":["STARRED"]}},
+  {"id":"star2","method":"POST","path":"/gmail/v1/users/me/messages/def456/modify","body":{"addLabelIds":["STARRED"]}}
+]'
+
+# Batch Drive requests - get metadata for multiple files
+workspace-cli batch drive --requests '[
+  {"id":"file1","method":"GET","path":"/drive/v3/files/abc123"},
+  {"id":"file2","method":"GET","path":"/drive/v3/files/def456"}
+]'
+
+# Batch Calendar requests - delete multiple events
+workspace-cli batch calendar --requests '[
+  {"id":"del1","method":"DELETE","path":"/calendar/v3/calendars/primary/events/evt1"},
+  {"id":"del2","method":"DELETE","path":"/calendar/v3/calendars/primary/events/evt2"}
+]'
+
+# Read requests from a JSON file
+workspace-cli batch gmail --file batch_requests.json
+
+# Pipe requests from stdin
+echo '[{"id":"1","method":"GET","path":"/gmail/v1/users/me/messages/abc"}]' | workspace-cli batch gmail
+```
+
+Batch output format:
+```json
+{
+  "status": "success",
+  "results": [
+    {"id": "msg1", "status": 200, "body": {...}},
+    {"id": "msg2", "status": 200, "body": {...}}
+  ],
+  "errors": []
+}
+```
+
+Status values:
+- `success`: All requests succeeded
+- `partial`: Some requests succeeded, some failed
+- `error`: All requests failed
+
 ## Output Formats
 
 Control output format with the `--format` flag:
@@ -515,6 +569,14 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 | `tasks create` | Create a task | `--list`, `--due`, `--notes` |
 | `tasks update` | Update a task | `--list`, `--title`, `--complete` |
 | `tasks delete` | Delete a task | `--list` |
+
+### Batch Commands
+
+| Command | Description | Key Options |
+|---------|-------------|-------------|
+| `batch gmail` | Execute batch Gmail API requests | `--requests`, `--file` |
+| `batch drive` | Execute batch Drive API requests | `--requests`, `--file` |
+| `batch calendar` | Execute batch Calendar API requests | `--requests`, `--file` |
 
 ### Auth Commands
 
@@ -770,8 +832,8 @@ For issues, questions, or contributions:
 
 - [x] ~~Implement remaining commands~~ (All core commands implemented!)
 - [x] ~~Extended field filtering~~ (`--fields` flag for JSON field selection)
+- [x] ~~Batch operations for bulk processing~~ (`batch gmail/drive/calendar` commands)
 - [ ] Model Context Protocol (MCP) server mode
-- [ ] Batch operations for bulk processing
 - [ ] Webhook support for real-time notifications
 - [ ] Performance benchmarks and optimizations
 

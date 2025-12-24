@@ -35,7 +35,7 @@ workspace-cli auth logout
 
 ```
 src/
-├── main.rs              # CLI entry point, clap command definitions (1733 lines)
+├── main.rs              # CLI entry point, clap command definitions (~2000 lines)
 ├── lib.rs               # Library exports
 ├── cli.rs               # CLI context utilities
 ├── auth/                # OAuth2 & token management
@@ -46,15 +46,16 @@ src/
 │   ├── api_client.rs    # ApiClient with rate limiting & retry
 │   ├── rate_limiter.rs  # Per-API rate limiters
 │   ├── retry.rs         # Exponential backoff retry logic
-│   └── batch.rs         # Batch request support
+│   └── batch.rs         # BatchClient for multipart/mixed batch requests
 ├── commands/            # Service implementations
-│   ├── gmail/           # list, get, send, delete, trash, labels
+│   ├── gmail/           # list, get, send, reply, delete, trash, labels
 │   ├── drive/           # list, upload, download, mkdir, share, etc.
 │   ├── calendar/        # list, create, update, delete events
 │   ├── docs/            # get, append, create, replace
 │   ├── sheets/          # get, update, append, create, clear
 │   ├── slides/          # get presentation/page
-│   └── tasks/           # lists, list, create, update, delete
+│   ├── tasks/           # lists, list, create, update, delete
+│   └── batch/           # CLI wrapper for batch API requests
 ├── config/              # Config file handling (~/.config/workspace-cli/)
 ├── error/               # Structured error types (CliError, WorkspaceError)
 ├── output/              # Formatter (JSON/JSONL/CSV), field filtering
@@ -193,6 +194,38 @@ tasks update <id> [--list @default] [--title <text>] [--complete]
 tasks delete <id> [--list @default]
 ```
 
+### Batch Commands
+Execute up to 100 API requests in a single HTTP call:
+```bash
+batch gmail --requests '<json-array>'     # Batch Gmail API requests
+batch gmail --file requests.json          # Read requests from file
+batch drive --requests '<json-array>'     # Batch Drive API requests
+batch calendar --requests '<json-array>'  # Batch Calendar API requests
+echo '<json>' | batch gmail               # Read from stdin
+```
+
+**Request format:**
+```json
+[
+  {"id": "req1", "method": "GET", "path": "/gmail/v1/users/me/messages/abc123"},
+  {"id": "req2", "method": "POST", "path": "/gmail/v1/users/me/messages/xyz/modify", "body": {"addLabelIds": ["STARRED"]}}
+]
+```
+
+**Response format:**
+```json
+{
+  "status": "success|partial|error",
+  "results": [{"id": "req1", "status": 200, "body": {...}}],
+  "errors": [{"id": "req2", "status": 400, "message": "..."}]
+}
+```
+
+**Path prefixes by service:**
+- Gmail: `/gmail/v1/...`
+- Drive: `/drive/v3/...`
+- Calendar: `/calendar/v3/...`
+
 ## Interpreting User Requests
 
 ### Common Patterns
@@ -222,6 +255,9 @@ tasks delete <id> [--list @default]
 | "my tasks" / "todo list" | `tasks list` |
 | "add task" | `tasks create "title"` |
 | "complete task" | `tasks update <id> --complete` |
+| "batch request" / "bulk operation" | `batch gmail/drive/calendar --requests '[...]'` |
+| "get multiple emails at once" | `batch gmail --requests '[{"id":"1","method":"GET","path":"/gmail/v1/users/me/messages/id1"},...]'` |
+| "star all these messages" | `batch gmail --requests '[{"id":"1","method":"POST","path":"/gmail/v1/users/me/messages/id1/modify","body":{"addLabelIds":["STARRED"]}}]'` |
 
 ### ID Extraction
 Google Workspace IDs are found in URLs:

@@ -173,6 +173,25 @@ enum Commands {
         #[command(subcommand)]
         command: AuthCommands,
     },
+    /// Execute batch API requests (up to 100 per batch)
+    #[command(long_about = "Execute multiple API requests in a single HTTP call for efficiency.\n\n\
+        Batch requests allow you to combine up to 100 API calls into a single request,\n\
+        significantly reducing latency and quota usage for bulk operations.\n\n\
+        Input format (JSON array):\n  \
+        [{\"id\":\"req1\",\"method\":\"GET\",\"path\":\"/users/me/messages/abc123\"},\n   \
+        {\"id\":\"req2\",\"method\":\"POST\",\"path\":\"/users/me/messages/xyz/modify\",\n    \
+        \"body\":{\"addLabelIds\":[\"STARRED\"]}}]\n\n\
+        Examples:\n\
+        Batch Gmail requests from JSON string:\n  \
+        workspace-cli batch gmail --requests '[{\"id\":\"1\",\"method\":\"GET\",\"path\":\"/users/me/messages/abc\"}]'\n\n\
+        Batch Gmail requests from file:\n  \
+        workspace-cli batch gmail --file requests.json\n\n\
+        Batch from stdin (pipe):\n  \
+        echo '[{\"id\":\"1\",\"method\":\"GET\",\"path\":\"/users/me/messages/abc\"}]' | workspace-cli batch gmail")]
+    Batch {
+        #[command(subcommand)]
+        command: BatchCommands,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -180,7 +199,7 @@ enum GmailCommands {
     /// List messages
     List {
         /// Search query (Gmail search syntax)
-        #[arg(long, short = 'q')]
+        #[arg(long)]
         query: Option<String>,
         /// Maximum number of results
         #[arg(long, default_value = "20")]
@@ -299,7 +318,7 @@ enum DriveCommands {
     /// List files
     List {
         /// Search query (Drive query syntax)
-        #[arg(long, short = 'q')]
+        #[arg(long)]
         query: Option<String>,
         /// Maximum results
         #[arg(long, default_value = "20")]
@@ -648,6 +667,37 @@ enum AuthCommands {
     Logout,
     /// Show current authentication status
     Status,
+}
+
+#[derive(Debug, Subcommand)]
+enum BatchCommands {
+    /// Execute a batch of Gmail API requests
+    Gmail {
+        /// JSON array of requests
+        #[arg(long)]
+        requests: Option<String>,
+        /// Read requests from JSON file
+        #[arg(long)]
+        file: Option<String>,
+    },
+    /// Execute a batch of Drive API requests
+    Drive {
+        /// JSON array of requests
+        #[arg(long)]
+        requests: Option<String>,
+        /// Read requests from JSON file
+        #[arg(long)]
+        file: Option<String>,
+    },
+    /// Execute a batch of Calendar API requests
+    Calendar {
+        /// JSON array of requests
+        #[arg(long)]
+        requests: Option<String>,
+        /// Read requests from JSON file
+        #[arg(long)]
+        file: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -1861,6 +1911,80 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     if !quiet {
                         println!("{}", serde_json::to_string_pretty(&status).unwrap());
                     }
+                }
+            }
+        }
+        Commands::Batch { command } => {
+            // Ensure we're authenticated before making API calls
+            let access_token = {
+                let mut tm = token_manager.write().await;
+                if let Err(e) = tm.ensure_authenticated().await {
+                    eprintln!(r#"{{"status":"error","message":"Authentication failed: {}"}}"#, e);
+                    std::process::exit(1);
+                }
+                match tm.get_access_token().await {
+                    Ok(token) => token,
+                    Err(e) => {
+                        eprintln!(r#"{{"status":"error","message":"Failed to get access token: {}"}}"#, e);
+                        std::process::exit(1);
+                    }
+                }
+            };
+
+            let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
+
+            // Determine service and get JSON input
+            let (service, requests_json, file_path) = match command {
+                BatchCommands::Gmail { requests, file } => ("gmail", requests, file),
+                BatchCommands::Drive { requests, file } => ("drive", requests, file),
+                BatchCommands::Calendar { requests, file } => ("calendar", requests, file),
+            };
+
+            // Parse input JSON from argument, file, or stdin
+            let json_str = if let Some(path) = file_path {
+                match std::fs::read_to_string(&path) {
+                    Ok(content) => content,
+                    Err(e) => {
+                        eprintln!(r#"{{"status":"error","message":"Failed to read file '{}': {}"}}"#, path, e);
+                        std::process::exit(1);
+                    }
+                }
+            } else if let Some(json) = requests_json {
+                json
+            } else {
+                // Read from stdin for piping
+                use std::io::Read;
+                let mut buffer = String::new();
+                if let Err(e) = std::io::stdin().read_to_string(&mut buffer) {
+                    eprintln!(r#"{{"status":"error","message":"Failed to read from stdin: {}"}}"#, e);
+                    std::process::exit(1);
+                }
+                buffer
+            };
+
+            // Parse JSON array of requests
+            let inputs: Vec<workspace_cli::commands::batch::BatchRequestInput> = match serde_json::from_str(&json_str) {
+                Ok(inputs) => inputs,
+                Err(e) => {
+                    eprintln!(r#"{{"status":"error","message":"Invalid JSON input: {}"}}"#, e);
+                    std::process::exit(1);
+                }
+            };
+
+            // Execute batch
+            match workspace_cli::commands::batch::execute_batch(service, inputs, &access_token).await {
+                Ok(output) => {
+                    if let Some(ref output_path) = cli.output {
+                        let file = std::fs::File::create(output_path)?;
+                        let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                        file_formatter.write(&output)?;
+                    } else {
+                        formatter.write(&output)?;
+                    }
+                }
+                Err(e) => {
+                    eprintln!(r#"{{"status":"error","message":"Batch request failed: {}"}}"#, e);
+                    std::process::exit(1);
                 }
             }
         }

@@ -5,6 +5,7 @@ pub mod docs;
 pub mod sheets;
 pub mod slides;
 pub mod tasks;
+pub mod batch;
 
 // Re-export commonly used types
 pub use gmail::types as gmail_types;
