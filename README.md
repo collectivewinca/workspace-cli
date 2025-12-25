@@ -425,7 +425,11 @@ Output:
   "messages": [
     {
       "id": "18c1a2b3c4d5e6f7",
-      "threadId": "18c1a2b3c4d5e6f7"
+      "threadId": "18c1a2b3c4d5e6f7",
+      "subject": "Weekly team sync notes",
+      "from": "Alice <alice@company.com>",
+      "date": "Mon, 23 Dec 2025 10:30:00 +0000",
+      "snippet": "Here are the notes from today's meeting..."
     }
   ],
   "resultSizeEstimate": 150
@@ -446,8 +450,8 @@ workspace-cli gmail list --limit 100 --format jsonl
 
 Output:
 ```jsonl
-{"id":"18c1a2b3c4d5e6f7","threadId":"18c1a2b3c4d5e6f7"}
-{"id":"28d1a2b3c4d5e6f8","threadId":"28d1a2b3c4d5e6f8"}
+{"id":"18c1a2b3c4d5e6f7","threadId":"18c1a2b3c4d5e6f7","subject":"Weekly sync","from":"Alice <alice@company.com>","date":"Mon, 23 Dec 2025 10:30:00 +0000","snippet":"Meeting notes..."}
+{"id":"28d1a2b3c4d5e6f8","threadId":"28d1a2b3c4d5e6f8","subject":"Project update","from":"Bob <bob@company.com>","date":"Mon, 23 Dec 2025 09:15:00 +0000","snippet":"Latest status..."}
 ```
 
 Ideal for piping to tools like `jq`:
@@ -703,8 +707,8 @@ find ./documents -name "*.pdf" | \
 ### Integration with jq
 
 ```bash
-# Extract specific fields
-workspace-cli gmail list --format json | jq '.messages[] | {id, threadId}'
+# Extract specific fields (gmail list includes subject, from, date by default)
+workspace-cli gmail list --format json | jq '.messages[] | {id, subject, from}'
 
 # Count unread emails
 workspace-cli gmail list --query "is:unread" --format json | jq '.resultSizeEstimate'
