@@ -127,8 +127,11 @@ workspace-cli gmail list --query "is:unread" --limit 5
 # Search emails from specific sender
 workspace-cli gmail list --query "from:boss@company.com" --limit 10
 
-# Get a specific message with decoded body
-workspace-cli gmail get <message-id> --decode-body
+# Get a specific message (minimal by default - headers + plain text body)
+workspace-cli gmail get <message-id>
+
+# Get full message structure (includes raw payload, MIME parts, etc.)
+workspace-cli gmail get <message-id> --full
 
 # Send an email
 workspace-cli gmail send \
@@ -237,8 +240,11 @@ workspace-cli drive unshare <file-id> <permission-id>
 ### Calendar Examples
 
 ```bash
-# List today's events
+# List today's events (minimal by default - id, summary, start, end, status)
 workspace-cli calendar list --time-min "2024-01-01T00:00:00Z"
+
+# List events with full details (attendees, organizer, description, etc.)
+workspace-cli calendar list --time-min "2024-01-01T00:00:00Z" --full
 
 # List events in a date range
 workspace-cli calendar list \
@@ -271,6 +277,9 @@ workspace-cli calendar list --sync-token <token>
 # Get document content as Markdown
 workspace-cli docs get <doc-id> --markdown
 
+# Get document content as plain text (optimized for AI agents)
+workspace-cli docs get <doc-id> --text
+
 # Get raw document JSON
 workspace-cli docs get <doc-id>
 
@@ -293,8 +302,11 @@ workspace-cli docs replace <doc-id> --find "OldText" --with "NewText" --match-ca
 # Create a new spreadsheet
 workspace-cli sheets create "My Spreadsheet"
 
-# Read spreadsheet range
+# Read spreadsheet range (returns values array by default)
 workspace-cli sheets get <sheet-id> --range "Sheet1!A1:C10"
+
+# Read with full range metadata wrapper
+workspace-cli sheets get <sheet-id> --range "Sheet1!A1:C10" --full
 
 # Read as CSV format
 workspace-cli sheets get <sheet-id> --range "Sheet1!A1:C10" --format csv
@@ -316,14 +328,17 @@ workspace-cli sheets clear <sheet-id> --range "Sheet1!A1:C10"
 ### Slides Examples
 
 ```bash
-# Get presentation info
+# Get presentation text content (default - optimized for AI agents)
 workspace-cli slides get <presentation-id>
 
-# Get text only
-workspace-cli slides get <presentation-id> --text-only
+# Get full presentation structure (masters, layouts, transforms, colors)
+workspace-cli slides get <presentation-id> --full
 
-# Get specific page
+# Get specific page text content
 workspace-cli slides page <presentation-id> --page 0
+
+# Get specific page with full structure
+workspace-cli slides page <presentation-id> --page 0 --full
 ```
 
 ### Tasks Examples
@@ -332,8 +347,11 @@ workspace-cli slides page <presentation-id> --page 0
 # List all task lists
 workspace-cli tasks lists
 
-# List tasks in default list
+# List tasks in default list (minimal by default - id, title, status, due, notes)
 workspace-cli tasks list
+
+# List tasks with full metadata (etag, selfLink, links, parent, position, etc.)
+workspace-cli tasks list --full
 
 # List tasks in specific list
 workspace-cli tasks list --list <list-id>
@@ -501,7 +519,7 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 | Command | Description | Key Options |
 |---------|-------------|-------------|
 | `gmail list` | List messages | `--query`, `--limit`, `--label` |
-| `gmail get` | Get a specific message | `--decode-body` |
+| `gmail get` | Get a specific message | `--full` (minimal by default) |
 | `gmail send` | Send an email | `--to`, `--subject`, `--body`, `--body-file` |
 | `gmail draft` | Create a draft | `--to`, `--subject`, `--body` |
 | `gmail delete` | Permanently delete message | None |
@@ -533,7 +551,7 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 
 | Command | Description | Key Options |
 |---------|-------------|-------------|
-| `calendar list` | List events | `--calendar`, `--time-min`, `--time-max`, `--sync-token` |
+| `calendar list` | List events | `--calendar`, `--time-min`, `--time-max`, `--sync-token`, `--full` |
 | `calendar create` | Create an event | `--summary`, `--start`, `--end`, `--description` |
 | `calendar update` | Update an event | `--summary`, `--start`, `--end` |
 | `calendar delete` | Delete an event | None |
@@ -542,7 +560,7 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 
 | Command | Description | Key Options |
 |---------|-------------|-------------|
-| `docs get` | Get document content | `--markdown` |
+| `docs get` | Get document content | `--markdown`, `--text` |
 | `docs create` | Create a new document | None |
 | `docs append` | Append text to document | None |
 | `docs replace` | Find and replace text | `--find`, `--with`, `--match-case` |
@@ -551,7 +569,7 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 
 | Command | Description | Key Options |
 |---------|-------------|-------------|
-| `sheets get` | Get spreadsheet values | `--range` |
+| `sheets get` | Get spreadsheet values | `--range`, `--full` |
 | `sheets create` | Create a new spreadsheet | `--sheets` |
 | `sheets update` | Update spreadsheet values | `--range`, `--values` |
 | `sheets append` | Append rows to spreadsheet | `--range`, `--values` |
@@ -561,15 +579,15 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 
 | Command | Description | Key Options |
 |---------|-------------|-------------|
-| `slides get` | Get presentation info | `--text-only` |
-| `slides page` | Get specific page | `--page`, `--text-only` |
+| `slides get` | Get presentation text | `--full` (text by default) |
+| `slides page` | Get specific page text | `--page`, `--full` |
 
 ### Tasks Commands
 
 | Command | Description | Key Options |
 |---------|-------------|-------------|
 | `tasks lists` | List task lists | None |
-| `tasks list` | List tasks | `--list`, `--show-completed` |
+| `tasks list` | List tasks | `--list`, `--show-completed`, `--full` |
 | `tasks create` | Create a task | `--list`, `--due`, `--notes` |
 | `tasks update` | Update a task | `--list`, `--title`, `--complete` |
 | `tasks delete` | Delete a task | `--list` |
@@ -666,11 +684,35 @@ RUST_LOG=debug workspace-cli gmail list --limit 1
 
 ## Performance Optimization
 
-### Token Efficiency
-Minimize token costs for AI agents:
+### Token Efficiency (Minimal by Default)
+All commands are optimized for AI agents with minimal output by default:
 
 ```bash
-# Use field masking to get only needed fields
+# Gmail get - minimal by default (headers + plain text body, ~88% reduction)
+workspace-cli gmail get <id>           # Minimal (default)
+workspace-cli gmail get <id> --full    # Full message structure
+
+# Gmail send/reply/modify - minimal responses (~90-99% reduction)
+workspace-cli gmail send --to user@example.com --subject "Hi" --body "Hello"
+# Returns: {"success":true,"id":"...","threadId":"..."}
+
+# Calendar list - minimal events by default (~50% reduction)
+workspace-cli calendar list --time-min "2024-01-01T00:00:00Z"
+workspace-cli calendar list --time-min "2024-01-01T00:00:00Z" --full
+
+# Sheets get - values array by default (~50% reduction)
+workspace-cli sheets get <id> --range "Sheet1!A1:C10"
+workspace-cli sheets get <id> --range "Sheet1!A1:C10" --full
+
+# Slides get - text extraction by default (~93% reduction)
+workspace-cli slides get <id>          # Text only
+workspace-cli slides get <id> --full   # Full structure
+
+# Tasks list - minimal fields by default (~40% reduction)
+workspace-cli tasks list
+workspace-cli tasks list --full
+
+# Use field masking for additional filtering
 workspace-cli gmail list --fields "id,snippet" --limit 100
 
 # Use JSONL for streaming large results

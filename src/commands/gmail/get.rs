@@ -1,7 +1,8 @@
 use crate::client::ApiClient;
 use crate::error::Result;
 use crate::utils::base64::decode_base64url_string;
-use super::types::{Message, MessagePart};
+use crate::utils::html_to_md::smart_convert;
+use super::types::{Message, MessagePart, MinimalMessage};
 
 pub async fn get_message(client: &ApiClient, id: &str, format: &str) -> Result<Message> {
     let query = [("format", format)];
@@ -85,4 +86,30 @@ pub fn get_header(message: &Message, name: &str) -> Option<String> {
     message.payload.as_ref()?.headers.iter()
         .find(|h| h.name.eq_ignore_ascii_case(name))
         .map(|h| h.value.clone())
+}
+
+/// Get a message in minimal format (optimized for AI agents)
+/// Returns only essential headers and plain text body
+pub async fn get_message_minimal(client: &ApiClient, id: &str) -> Result<MinimalMessage> {
+    let message = get_message(client, id, "full").await?;
+
+    // Extract essential headers
+    let from = get_header(&message, "From");
+    let to = get_header(&message, "To");
+    let subject = get_header(&message, "Subject");
+    let date = get_header(&message, "Date");
+
+    // Extract and convert body to plain text
+    let body = extract_body(&message).map(|b| smart_convert(&b));
+
+    Ok(MinimalMessage {
+        id: message.id,
+        thread_id: message.thread_id,
+        from,
+        to,
+        subject,
+        date,
+        labels: message.label_ids,
+        body,
+    })
 }

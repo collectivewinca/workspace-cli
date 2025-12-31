@@ -57,6 +57,50 @@ pub struct Tasks {
     pub next_page_token: Option<String>,
 }
 
+/// Minimal task format optimized for AI agents (reduced token usage)
+/// Excludes: kind, etag, selfLink, links, parent, position, hidden, deleted, updated
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MinimalTask {
+    pub id: Option<String>,
+    pub title: String,
+    pub status: Option<String>,
+    pub due: Option<String>,
+    pub notes: Option<String>,
+    pub completed: Option<String>,
+}
+
+impl MinimalTask {
+    pub fn from_task(task: &Task) -> Self {
+        Self {
+            id: task.id.clone(),
+            title: task.title.clone(),
+            status: task.status.clone(),
+            due: task.due.clone(),
+            notes: task.notes.clone(),
+            completed: task.completed.clone(),
+        }
+    }
+}
+
+/// Minimal task list response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MinimalTasks {
+    #[serde(default)]
+    pub items: Vec<MinimalTask>,
+    pub next_page_token: Option<String>,
+}
+
+impl MinimalTasks {
+    pub fn from_tasks(tasks: &Tasks) -> Self {
+        Self {
+            items: tasks.items.iter().map(MinimalTask::from_task).collect(),
+            next_page_token: tasks.next_page_token.clone(),
+        }
+    }
+}
+
 impl Task {
     pub fn new(title: impl Into<String>) -> Self {
         Self {

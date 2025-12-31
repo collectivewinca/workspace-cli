@@ -123,7 +123,7 @@ ErrorCode::ServerError
 ### Gmail Commands
 ```bash
 gmail list [--query "is:unread"] [--limit 20] [--label INBOX]
-gmail get <id> [--decode-body]
+gmail get <id> [--full]                    # Minimal by default (headers + plain text body)
 gmail send --to <email> --subject <text> --body <text> [--body-file <path>]
 gmail draft --to <email> --subject <text> [--body <text>]
 gmail reply <id> --body <text> [--body-file <path>] [--all]
@@ -134,6 +134,11 @@ gmail untrash <id>
 gmail labels
 gmail modify <id> [--add-labels L1,L2] [--remove-labels L3] [--mark-read] [--mark-unread] [--star] [--unstar] [--archive]
 ```
+
+**Token Optimization (defaults to minimal output):**
+- `gmail get` returns essential headers (from, to, subject, date) + plain text body (~88% reduction). Use `--full` for raw message structure.
+- `gmail send/reply/draft` return only `{success, id, threadId}` (~90% reduction)
+- `gmail modify` returns only `{success, id, labels}` (~99% reduction)
 
 ### Drive Commands
 ```bash
@@ -156,43 +161,53 @@ drive unshare <id> <permission-id>
 
 ### Calendar Commands
 ```bash
-calendar list [--calendar primary] [--time-min 2025-01-01T00:00:00Z] [--time-max ...] [--limit 20] [--sync-token <token>]
+calendar list [--calendar primary] [--time-min 2025-01-01T00:00:00Z] [--time-max ...] [--limit 20] [--sync-token <token>] [--full]
 calendar create --summary <title> --start <datetime> --end <datetime> [--description <text>] [--calendar primary]
 calendar update <id> [--summary <title>] [--start <datetime>] [--end <datetime>] [--calendar primary]
 calendar delete <id> [--calendar primary]
 ```
 
+**Token Optimization:** `calendar list` returns minimal event fields (id, summary, start, end, status) by default (~50% reduction). Use `--full` for attendees, organizer, description, recurrence, etc.
+
 ### Docs Commands
 ```bash
-docs get <id> [--markdown]
+docs get <id> [--markdown] [--text]        # --text for plain text output
 docs create <title>
 docs append <id> <text>
 docs replace <id> --find <text> --with <replacement> [--match-case]
 ```
 
+**Token Optimization:** Use `--text` for plain text extraction (~70% reduction vs JSON structure). Use `--markdown` for formatted text.
+
 ### Sheets Commands
 ```bash
-sheets get <id> --range "Sheet1!A1:C10"
+sheets get <id> --range "Sheet1!A1:C10" [--full]  # Values array by default
 sheets create <title>
 sheets update <id> --range "Sheet1!A1:B2" --values '[["Name","Value"],["A","1"]]'
 sheets append <id> --range "Sheet1!A1" --values '[["Row1","Data"]]'
 sheets clear <id> --range "Sheet1!A1:C10"
 ```
 
+**Token Optimization:** `sheets get` returns just the values array by default (~50% reduction). Use `--full` for range metadata wrapper.
+
 ### Slides Commands
 ```bash
-slides get <id> [--text-only]
-slides page <id> --page 0 [--text-only]
+slides get <id> [--full]                   # Text extraction by default
+slides page <id> --page 0 [--full]         # Text extraction by default
 ```
+
+**Token Optimization:** Returns extracted text content by default (~93% reduction). Use `--full` for complete presentation structure (masters, layouts, transforms, colors).
 
 ### Tasks Commands
 ```bash
 tasks lists                           # List all task lists
-tasks list [--list @default] [--limit 20] [--show-completed]
+tasks list [--list @default] [--limit 20] [--show-completed] [--full]
 tasks create <title> [--list @default] [--due 2025-01-20T12:00:00Z] [--notes <text>]
 tasks update <id> [--list @default] [--title <text>] [--complete]
 tasks delete <id> [--list @default]
 ```
+
+**Token Optimization:** `tasks list` returns minimal task fields (id, title, status, due, notes, completed) by default (~40% reduction). Use `--full` for etag, selfLink, links, parent, position, etc.
 
 ### Batch Commands
 Execute up to 100 API requests in a single HTTP call:
@@ -235,7 +250,7 @@ echo '<json>' | batch gmail               # Read from stdin
 | "list my emails" / "show inbox" | `gmail list --limit 20` |
 | "unread emails" | `gmail list --query "is:unread"` |
 | "emails from X" | `gmail list --query "from:X"` |
-| "read email <id>" | `gmail get <id> --decode-body` |
+| "read email <id>" | `gmail get <id>` |
 | "send email to X" | `gmail send --to X --subject "..." --body "..."` |
 | "reply to email" | `gmail reply <id> --body "..."` |
 | "reply all" | `gmail reply <id> --body "..." --all` |

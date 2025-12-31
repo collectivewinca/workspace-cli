@@ -72,3 +72,47 @@ pub struct CalendarListEntry {
     pub primary: Option<bool>,
     pub access_role: Option<String>,
 }
+
+/// Minimal event format optimized for AI agents (reduced token usage)
+/// Excludes: attendees, organizer, description, location, htmlLink, created, updated, recurrence
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MinimalEvent {
+    pub id: Option<String>,
+    pub summary: Option<String>,
+    pub start: Option<EventDateTime>,
+    pub end: Option<EventDateTime>,
+    pub status: Option<String>,
+}
+
+impl MinimalEvent {
+    pub fn from_event(event: &Event) -> Self {
+        Self {
+            id: event.id.clone(),
+            summary: event.summary.clone(),
+            start: event.start.clone(),
+            end: event.end.clone(),
+            status: event.status.clone(),
+        }
+    }
+}
+
+/// Minimal event list response
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MinimalEventList {
+    #[serde(default)]
+    pub items: Vec<MinimalEvent>,
+    pub next_page_token: Option<String>,
+    pub next_sync_token: Option<String>,
+}
+
+impl MinimalEventList {
+    pub fn from_event_list(list: &EventList) -> Self {
+        Self {
+            items: list.items.iter().map(MinimalEvent::from_event).collect(),
+            next_page_token: list.next_page_token.clone(),
+            next_sync_token: list.next_sync_token.clone(),
+        }
+    }
+}

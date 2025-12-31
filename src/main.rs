@@ -212,9 +212,9 @@ enum GmailCommands {
     Get {
         /// Message ID
         id: String,
-        /// Decode body content
+        /// Return full message structure (includes all headers, MIME parts, raw body)
         #[arg(long)]
-        decode_body: bool,
+        full: bool,
     },
     /// Send an email
     Send {
@@ -447,6 +447,9 @@ enum CalendarCommands {
         /// Sync token for incremental sync
         #[arg(long)]
         sync_token: Option<String>,
+        /// Return full event data (includes attendees, organizer, description, etc.)
+        #[arg(long)]
+        full: bool,
     },
     /// Create an event
     Create {
@@ -502,6 +505,9 @@ enum DocsCommands {
         /// Output as markdown
         #[arg(long)]
         markdown: bool,
+        /// Output as plain text (most token-efficient)
+        #[arg(long)]
+        text: bool,
     },
     /// Append text to document
     Append {
@@ -540,6 +546,9 @@ enum SheetsCommands {
         /// Range in A1 notation (e.g., Sheet1!A1:C10)
         #[arg(long)]
         range: String,
+        /// Return full ValueRange (includes range, majorDimension metadata)
+        #[arg(long)]
+        full: bool,
     },
     /// Update spreadsheet values
     Update {
@@ -584,9 +593,9 @@ enum SlidesCommands {
     Get {
         /// Presentation ID
         id: String,
-        /// Extract text only
+        /// Return full presentation structure (includes masters, layouts, transforms, etc.)
         #[arg(long)]
-        text_only: bool,
+        full: bool,
     },
     /// Get specific page
     Page {
@@ -595,9 +604,9 @@ enum SlidesCommands {
         /// Page number (0-indexed)
         #[arg(long)]
         page: u32,
-        /// Extract text only
+        /// Return full page structure (includes transforms, sizes, etc.)
         #[arg(long)]
-        text_only: bool,
+        full: bool,
     },
 }
 
@@ -616,6 +625,9 @@ enum TasksCommands {
         /// Show completed tasks
         #[arg(long)]
         show_completed: bool,
+        /// Return full task data (includes kind, etag, links, position, etc.)
+        #[arg(long)]
+        full: bool,
     },
     /// Create a task
     Create {
@@ -776,21 +788,40 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                GmailCommands::Get { id, decode_body } => {
-                    let format_param = if decode_body { "full" } else { "metadata" };
-                    match workspace_cli::commands::gmail::get::get_message(&client, &id, format_param).await {
-                        Ok(response) => {
-                            if let Some(ref output_path) = cli.output {
-                                let file = std::fs::File::create(output_path)?;
-                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                file_formatter.write(&response)?;
-                            } else {
-                                formatter.write(&response)?;
+                GmailCommands::Get { id, full } => {
+                    if full {
+                        // Return full message structure
+                        match workspace_cli::commands::gmail::get::get_message(&client, &id, "full").await {
+                            Ok(response) => {
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    file_formatter.write(&response)?;
+                                } else {
+                                    formatter.write(&response)?;
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                                std::process::exit(1);
                             }
                         }
-                        Err(e) => {
-                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
-                            std::process::exit(1);
+                    } else {
+                        // Default: minimal format (essential headers + plain text body)
+                        match workspace_cli::commands::gmail::get::get_message_minimal(&client, &id).await {
+                            Ok(response) => {
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    file_formatter.write(&response)?;
+                                } else {
+                                    formatter.write(&response)?;
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                                std::process::exit(1);
+                            }
                         }
                     }
                 }
@@ -813,7 +844,9 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     };
 
                     match workspace_cli::commands::gmail::send::send_message(&client, params).await {
-                        Ok(response) => {
+                        Ok(message) => {
+                            // Return minimal response (success + id + threadId)
+                            let response = workspace_cli::commands::gmail::types::SendResponse::from_message(&message);
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
                                 let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
@@ -843,7 +876,14 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     };
 
                     match workspace_cli::commands::gmail::send::create_draft(&client, params).await {
-                        Ok(response) => {
+                        Ok(draft) => {
+                            // Return minimal response (success + draft id + message info)
+                            let response = workspace_cli::commands::gmail::types::DraftResponse {
+                                success: true,
+                                id: draft["id"].as_str().unwrap_or("").to_string(),
+                                message_id: draft["message"]["id"].as_str().map(String::from),
+                                thread_id: draft["message"]["threadId"].as_str().map(String::from),
+                            };
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
                                 let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
@@ -950,12 +990,14 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
                     match workspace_cli::commands::gmail::labels::modify_labels(&client, &id, add, remove).await {
                         Ok(response) => {
+                            // Return minimal response (success + id + labels) to reduce token usage
+                            let minimal = workspace_cli::commands::gmail::types::ModifyResponse::from_message(&response);
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
                                 let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                file_formatter.write(&response)?;
+                                file_formatter.write(&minimal)?;
                             } else {
-                                formatter.write(&response)?;
+                                formatter.write(&minimal)?;
                             }
                         }
                         Err(e) => {
@@ -1009,7 +1051,9 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     };
 
                     match workspace_cli::commands::gmail::send::send_message(&client, params).await {
-                        Ok(response) => {
+                        Ok(message) => {
+                            // Return minimal response (success + id + threadId)
+                            let response = workspace_cli::commands::gmail::types::SendResponse::from_message(&message);
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
                                 let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
@@ -1056,7 +1100,14 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     };
 
                     match workspace_cli::commands::gmail::send::create_draft(&client, params).await {
-                        Ok(response) => {
+                        Ok(draft) => {
+                            // Return minimal response (success + draft id + message info)
+                            let response = workspace_cli::commands::gmail::types::DraftResponse {
+                                success: true,
+                                id: draft["id"].as_str().unwrap_or("").to_string(),
+                                message_id: draft["message"]["id"].as_str().map(String::from),
+                                thread_id: draft["message"]["threadId"].as_str().map(String::from),
+                            };
                             if let Some(ref output_path) = cli.output {
                                 let file = std::fs::File::create(output_path)?;
                                 let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
@@ -1382,7 +1433,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
-                CalendarCommands::List { calendar, time_min, time_max, limit, sync_token } => {
+                CalendarCommands::List { calendar, time_min, time_max, limit, sync_token, full } => {
                     let params = workspace_cli::commands::calendar::list::ListEventsParams {
                         calendar_id: calendar,
                         time_min,
@@ -1395,12 +1446,25 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     };
                     match workspace_cli::commands::calendar::list::list_events(&client, params).await {
                         Ok(response) => {
-                            if let Some(ref output_path) = cli.output {
-                                let file = std::fs::File::create(output_path)?;
-                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                file_formatter.write(&response)?;
+                            if full {
+                                // Return full event data
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    file_formatter.write(&response)?;
+                                } else {
+                                    formatter.write(&response)?;
+                                }
                             } else {
-                                formatter.write(&response)?;
+                                // Default: minimal event data (id, summary, start, end, status)
+                                let minimal = workspace_cli::commands::calendar::types::MinimalEventList::from_event_list(&response);
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    file_formatter.write(&minimal)?;
+                                } else {
+                                    formatter.write(&minimal)?;
+                                }
                             }
                         }
                         Err(e) => {
@@ -1494,10 +1558,14 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
-                DocsCommands::Get { id, markdown } => {
+                DocsCommands::Get { id, markdown, text } => {
                     match workspace_cli::commands::docs::get::get_document(&client, &id).await {
                         Ok(doc) => {
-                            if markdown {
+                            if text {
+                                // Plain text output (most token-efficient)
+                                let txt = workspace_cli::commands::docs::get::document_to_text(&doc);
+                                println!("{}", txt);
+                            } else if markdown {
                                 let md = workspace_cli::commands::docs::get::document_to_markdown(&doc);
                                 println!("{}", md);
                             } else if let Some(ref output_path) = cli.output {
@@ -1581,7 +1649,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
-                SheetsCommands::Get { id, range } => {
+                SheetsCommands::Get { id, range, full } => {
                     match workspace_cli::commands::sheets::get::get_values(&client, &id, &range).await {
                         Ok(response) => {
                             if format == OutputFormat::Csv {
@@ -1591,12 +1659,24 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                 } else if !quiet {
                                     print!("{}", csv);
                                 }
-                            } else if let Some(ref output_path) = cli.output {
-                                let file = std::fs::File::create(output_path)?;
-                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                file_formatter.write(&response)?;
+                            } else if full {
+                                // Return full ValueRange with metadata
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    file_formatter.write(&response)?;
+                                } else {
+                                    formatter.write(&response)?;
+                                }
                             } else {
-                                formatter.write(&response)?;
+                                // Default: return just the values array (minimal, token-efficient)
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    file_formatter.write(&response.values)?;
+                                } else {
+                                    formatter.write(&response.values)?;
+                                }
                             }
                         }
                         Err(e) => {
@@ -1705,22 +1785,26 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
-                SlidesCommands::Get { id, text_only } => {
+                SlidesCommands::Get { id, full } => {
                     match workspace_cli::commands::slides::get::get_presentation(&client, &id).await {
                         Ok(presentation) => {
-                            if text_only {
+                            if full {
+                                // Return full presentation structure
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    file_formatter.write(&presentation)?;
+                                } else {
+                                    formatter.write(&presentation)?;
+                                }
+                            } else {
+                                // Default: text extraction (minimal, token-efficient)
                                 let text = workspace_cli::commands::slides::get::extract_all_text(&presentation);
                                 if let Some(ref output_path) = cli.output {
                                     std::fs::write(output_path, &text)?;
                                 } else {
                                     println!("{}", text);
                                 }
-                            } else if let Some(ref output_path) = cli.output {
-                                let file = std::fs::File::create(output_path)?;
-                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                file_formatter.write(&presentation)?;
-                            } else {
-                                formatter.write(&presentation)?;
                             }
                         }
                         Err(e) => {
@@ -1729,7 +1813,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                SlidesCommands::Page { id, page, text_only } => {
+                SlidesCommands::Page { id, page, full } => {
                     // Get the presentation first, then extract the specific slide
                     match workspace_cli::commands::slides::get::get_presentation(&client, &id).await {
                         Ok(presentation) => {
@@ -1740,19 +1824,23 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             }
 
                             let slide = &presentation.slides[page_index];
-                            if text_only {
+                            if full {
+                                // Return full page structure
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    file_formatter.write(slide)?;
+                                } else {
+                                    formatter.write(slide)?;
+                                }
+                            } else {
+                                // Default: text extraction (minimal, token-efficient)
                                 let text = workspace_cli::commands::slides::get::extract_page_text(slide);
                                 if let Some(ref output_path) = cli.output {
                                     std::fs::write(output_path, &text)?;
                                 } else {
                                     println!("{}", text);
                                 }
-                            } else if let Some(ref output_path) = cli.output {
-                                let file = std::fs::File::create(output_path)?;
-                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                file_formatter.write(slide)?;
-                            } else {
-                                formatter.write(slide)?;
                             }
                         }
                         Err(e) => {
@@ -1794,7 +1882,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                TasksCommands::List { list, limit, show_completed } => {
+                TasksCommands::List { list, limit, show_completed, full } => {
                     let params = workspace_cli::commands::tasks::list::ListTasksParams {
                         task_list_id: list,
                         max_results: limit.min(100),  // API max is 100
@@ -1804,12 +1892,25 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     };
                     match workspace_cli::commands::tasks::list::list_tasks(&client, params).await {
                         Ok(response) => {
-                            if let Some(ref output_path) = cli.output {
-                                let file = std::fs::File::create(output_path)?;
-                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
-                                file_formatter.write(&response)?;
+                            if full {
+                                // Return full task data
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    file_formatter.write(&response)?;
+                                } else {
+                                    formatter.write(&response)?;
+                                }
                             } else {
-                                formatter.write(&response)?;
+                                // Default: minimal task data (id, title, status, due, notes, completed)
+                                let minimal = workspace_cli::commands::tasks::types::MinimalTasks::from_tasks(&response);
+                                if let Some(ref output_path) = cli.output {
+                                    let file = std::fs::File::create(output_path)?;
+                                    let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                    file_formatter.write(&minimal)?;
+                                } else {
+                                    formatter.write(&minimal)?;
+                                }
                             }
                         }
                         Err(e) => {

@@ -91,6 +91,74 @@ pub struct EnrichedListResponse {
     pub result_size_estimate: Option<u64>,
 }
 
+/// Minimal message format optimized for AI agents (reduced token usage)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MinimalMessage {
+    pub id: String,
+    pub thread_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub to: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub subject: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub date: Option<String>,
+    #[serde(default)]
+    pub labels: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+}
+
+/// Response for label modification operations (minimal token usage)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModifyResponse {
+    pub success: bool,
+    pub id: String,
+    pub labels: Vec<String>,
+}
+
+impl ModifyResponse {
+    pub fn from_message(message: &Message) -> Self {
+        Self {
+            success: true,
+            id: message.id.clone(),
+            labels: message.label_ids.clone(),
+        }
+    }
+}
+
+/// Response for send/reply operations (minimal token usage)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SendResponse {
+    pub success: bool,
+    pub id: String,
+    pub thread_id: String,
+}
+
+impl SendResponse {
+    pub fn from_message(message: &Message) -> Self {
+        Self {
+            success: true,
+            id: message.id.clone(),
+            thread_id: message.thread_id.clone(),
+        }
+    }
+}
+
+/// Response for draft operations (minimal token usage)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DraftResponse {
+    pub success: bool,
+    pub id: String,
+    pub message_id: Option<String>,
+    pub thread_id: Option<String>,
+}
+
 // For sending emails
 #[derive(Debug, Clone, Serialize)]
 pub struct SendMessageRequest {
