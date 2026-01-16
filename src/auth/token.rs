@@ -9,15 +9,32 @@ pub struct TokenManager {
     storage: TokenStorage,
     config: Config,
     credentials_path: Option<PathBuf>,
+    current_account: String,
 }
 
 impl TokenManager {
     /// Create a new token manager with the given config
     pub fn new(config: Config) -> Self {
+        let account = config.auth.current_account
+            .clone()
+            .unwrap_or_else(|| "default".to_string());
+        
         Self {
             authenticator: None,
-            storage: TokenStorage::new("default"),
+            storage: TokenStorage::new(&account),
             credentials_path: None,
+            current_account: account,
+            config,
+        }
+    }
+
+    /// Create a new token manager for a specific account
+    pub fn new_for_account(config: Config, account: &str) -> Self {
+        Self {
+            authenticator: None,
+            storage: TokenStorage::new(account),
+            credentials_path: None,
+            current_account: account.to_string(),
             config,
         }
     }
@@ -210,11 +227,46 @@ impl TokenManager {
         }
     }
 
-    /// Get the token cache file path
+    /// Get the token cache file path (account-specific)
     fn token_cache_path(&self) -> PathBuf {
         Config::config_dir()
-            .map(|d| d.join("token_cache.json"))
-            .unwrap_or_else(|| PathBuf::from("token_cache.json"))
+            .map(|d| d.join(format!("token_cache_{}.json", self.current_account)))
+            .unwrap_or_else(|| PathBuf::from(format!("token_cache_{}.json", self.current_account)))
+    }
+
+    /// Get current account identifier
+    pub fn current_account(&self) -> &str {
+        &self.current_account
+    }
+
+    /// List all authenticated accounts
+    pub fn list_accounts() -> Result<Vec<String>, TokenManagerError> {
+        let config_dir = Config::config_dir()
+            .ok_or_else(|| TokenManagerError::Other("Could not determine config directory".into()))?;
+        
+        let mut accounts = Vec::new();
+        
+        // Find all token_cache_*.json files
+        if let Ok(entries) = std::fs::read_dir(&config_dir) {
+            for entry in entries.flatten() {
+                let filename = entry.file_name();
+                let filename_str = filename.to_string_lossy();
+                
+                if filename_str.starts_with("token_cache_") && filename_str.ends_with(".json") {
+                    // Extract account name from token_cache_{account}.json
+                    let account = filename_str
+                        .strip_prefix("token_cache_")
+                        .and_then(|s| s.strip_suffix(".json"))
+                        .map(|s| s.to_string());
+                    
+                    if let Some(acc) = account {
+                        accounts.push(acc);
+                    }
+                }
+            }
+        }
+        
+        Ok(accounts)
     }
 }
 
@@ -239,4 +291,7 @@ pub enum TokenManagerError {
 
     #[error("Token storage error: {0}")]
     Storage(#[from] KeyringError),
+
+    #[error("{0}")]
+    Other(String),
 }

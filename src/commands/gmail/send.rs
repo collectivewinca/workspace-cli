@@ -16,6 +16,8 @@ pub struct ComposeParams {
     pub references: Option<String>,
     /// Gmail thread ID (for replies)
     pub thread_id: Option<String>,
+    /// Whether the body is HTML content
+    pub is_html: bool,
 }
 
 pub async fn send_message(client: &ApiClient, params: ComposeParams) -> Result<Message> {
@@ -100,7 +102,14 @@ fn build_raw_email(params: &ComposeParams) -> String {
     }
 
     email.push_str("MIME-Version: 1.0\r\n");
-    email.push_str("Content-Type: text/plain; charset=utf-8\r\n");
+    
+    // Set Content-Type based on whether body is HTML or plain text
+    if params.is_html {
+        email.push_str("Content-Type: text/html; charset=utf-8\r\n");
+    } else {
+        email.push_str("Content-Type: text/plain; charset=utf-8\r\n");
+    }
+    
     email.push_str("\r\n");
     email.push_str(&params.body);
 

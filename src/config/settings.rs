@@ -19,6 +19,12 @@ pub struct AuthConfig {
     /// Path to service account key JSON (for headless mode)
     #[serde(default)]
     pub service_account_path: Option<PathBuf>,
+    /// Current active account (email or identifier)
+    #[serde(default)]
+    pub current_account: Option<String>,
+    /// Map of account names to their credentials paths
+    #[serde(default)]
+    pub accounts: std::collections::HashMap<String, PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -68,6 +74,8 @@ impl Default for AuthConfig {
         Self {
             credentials_path: None,
             service_account_path: None,
+            current_account: None,
+            accounts: std::collections::HashMap::new(),
         }
     }
 }

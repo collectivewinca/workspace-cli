@@ -8,7 +8,7 @@ High-performance Google Workspace CLI optimized for AI agent integration.
 
 ## Features
 
-- **Gmail**: List, read, send, draft, reply, delete, trash/untrash, labels management, and modify messages
+- **Gmail**: List, read, send (plain text & HTML), draft, reply, delete, trash/untrash, labels management, and modify messages
 - **Drive**: List, upload, download, delete, trash/untrash, mkdir, move, copy, rename, share, and manage permissions
 - **Calendar**: List, create, update, and delete events with sync token support
 - **Docs**: Read documents as Markdown, append content, create documents, and find/replace text
@@ -81,14 +81,32 @@ For user-attended sessions with browser-based authentication:
 
 4. **Login with OAuth2**
    ```bash
+   # Login with first account
+   workspace-cli auth login --credentials path/to/credentials.json --account user@example.com
+   
+   # Or let it auto-generate an account name
    workspace-cli auth login --credentials path/to/credentials.json
    ```
    - This will open your browser for authentication
    - Tokens are securely stored in your OS keyring (macOS Keychain, Windows Credential Manager, Linux Secret Service)
+   - Each account's tokens are stored separately
 
-5. **Check Authentication Status**
+5. **Multi-Account Management**
    ```bash
+   # List all authenticated accounts
+   workspace-cli auth accounts
+   
+   # Switch to a different account
+   workspace-cli auth switch user2@example.com
+   
+   # Check current authentication status
    workspace-cli auth status
+   
+   # Logout specific account
+   workspace-cli auth logout --account user@example.com
+   
+   # Logout all accounts
+   workspace-cli auth logout --all
    ```
 
 ### Service Account (Headless)
@@ -110,10 +128,46 @@ For server environments, CI/CD pipelines, or automated workflows:
    - For Google Workspace admin access, enable domain-wide delegation
    - Configure OAuth scopes in Workspace admin console
 
+### Multi-Account Support
+
+The CLI supports multiple Google accounts simultaneously:
+
+```bash
+# Login with multiple accounts
+workspace-cli auth login --credentials creds.json --account work@company.com
+workspace-cli auth login --credentials creds.json --account personal@gmail.com
+
+# List all accounts
+workspace-cli auth accounts
+# Output:
+# {
+#   "accounts": [
+#     {"name": "work@company.com", "current": true},
+#     {"name": "personal@gmail.com", "current": false}
+#   ]
+# }
+
+# Switch between accounts instantly (no re-authentication needed)
+workspace-cli auth switch personal@gmail.com
+
+# All commands now use the switched account
+workspace-cli gmail list --limit 5
+
+# Switch back
+workspace-cli auth switch work@company.com
+```
+
 ### Logout
 
 ```bash
+# Logout current account
 workspace-cli auth logout
+
+# Logout specific account
+workspace-cli auth logout --account user@example.com
+
+# Logout all accounts
+workspace-cli auth logout --all
 ```
 
 ## Quick Start
@@ -133,17 +187,31 @@ workspace-cli gmail get <message-id>
 # Get full message structure (includes raw payload, MIME parts, etc.)
 workspace-cli gmail get <message-id> --full
 
-# Send an email
+# Send a plain text email
 workspace-cli gmail send \
   --to user@example.com \
   --subject "Hello from workspace-cli" \
   --body "This is a test email"
 
-# Send email with body from file
+# Send an HTML email
+workspace-cli gmail send \
+  --to user@example.com \
+  --subject "HTML Newsletter" \
+  --body "<h1>Hello</h1><p>This is <strong>HTML</strong> content</p>" \
+  --html
+
+# Send email with body from file (plain text)
 workspace-cli gmail send \
   --to user@example.com \
   --subject "Report" \
   --body-file report.txt
+
+# Send HTML email from file
+workspace-cli gmail send \
+  --to user@example.com \
+  --subject "Newsletter" \
+  --body-file newsletter.html \
+  --html
 
 # Filter by label
 workspace-cli gmail list --label "INBOX" --limit 20
@@ -171,6 +239,54 @@ workspace-cli gmail modify <message-id> --archive
 
 # Add/remove labels
 workspace-cli gmail modify <message-id> --add-labels "Label1,Label2" --remove-labels "INBOX"
+
+# Reply to a message
+workspace-cli gmail reply <message-id> --body "Thanks for your email!"
+
+# Reply with HTML formatting
+workspace-cli gmail reply <message-id> --body "<p>Thanks for your <strong>email</strong>!</p>" --html
+
+# Reply-all (includes Cc recipients)
+workspace-cli gmail reply <message-id> --body "Reply to all" --all
+```
+
+#### HTML Email Support
+
+All Gmail send/reply commands support HTML content with the `--html` flag:
+
+```bash
+# Simple HTML email
+workspace-cli gmail send \
+  --to user@example.com \
+  --subject "Welcome" \
+  --body "<h1>Welcome!</h1><p>Thanks for joining us.</p>" \
+  --html
+
+# Rich HTML with styling
+workspace-cli gmail send \
+  --to team@company.com \
+  --subject "Weekly Update" \
+  --body "<html>
+<head><style>
+  body { font-family: Arial, sans-serif; }
+  .highlight { background: yellow; }
+</style></head>
+<body>
+  <h2>Project Status</h2>
+  <ul>
+    <li class='highlight'>Feature A: Complete</li>
+    <li>Feature B: In Progress</li>
+  </ul>
+</body>
+</html>" \
+  --html
+
+# HTML from file (newsletters, templates, etc.)
+workspace-cli gmail send \
+  --to subscribers@company.com \
+  --subject "Monthly Newsletter" \
+  --body-file newsletter.html \
+  --html
 ```
 
 ### Drive Examples
@@ -520,8 +636,10 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 |---------|-------------|-------------|
 | `gmail list` | List messages | `--query`, `--limit`, `--label` |
 | `gmail get` | Get a specific message | `--full` (minimal by default) |
-| `gmail send` | Send an email | `--to`, `--subject`, `--body`, `--body-file` |
-| `gmail draft` | Create a draft | `--to`, `--subject`, `--body` |
+| `gmail send` | Send an email | `--to`, `--subject`, `--body`, `--body-file`, `--html` |
+| `gmail reply` | Reply to a message | `--body`, `--body-file`, `--html`, `--all` |
+| `gmail draft` | Create a draft | `--to`, `--subject`, `--body`, `--html` |
+| `gmail reply-draft` | Create a reply draft | `--body`, `--html`, `--all` |
 | `gmail delete` | Permanently delete message | None |
 | `gmail trash` | Move message to trash | None |
 | `gmail untrash` | Restore message from trash | None |
@@ -604,9 +722,11 @@ workspace-cli gmail send --to user@example.com --subject "Test" --body "Hello" -
 
 | Command | Description | Key Options |
 |---------|-------------|-------------|
-| `auth login` | Login with OAuth2 | `--credentials` |
-| `auth logout` | Logout and clear tokens | None |
+| `auth login` | Login with OAuth2 | `--credentials`, `--account` |
+| `auth logout` | Logout and clear tokens | `--account`, `--all` |
 | `auth status` | Show authentication status | None |
+| `auth accounts` | List all authenticated accounts | None |
+| `auth switch` | Switch to a different account | None |
 
 ## Environment Variables
 

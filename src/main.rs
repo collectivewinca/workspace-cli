@@ -161,14 +161,20 @@ enum Commands {
     #[command(long_about = "Authentication management for Google Workspace APIs.\n\n\
         Examples:\n\
         Login with OAuth2 (interactive browser flow):\n  \
-        workspace-cli auth login\n\n\
-        Login with custom credentials file:\n  \
-        workspace-cli auth login --credentials /path/to/credentials.json\n\n\
+        workspace-cli auth login --credentials credentials.json --account user@example.com\n\n\
+        Login with auto-generated account name:\n  \
+        workspace-cli auth login --credentials credentials.json\n\n\
+        List all authenticated accounts:\n  \
+        workspace-cli auth accounts\n\n\
+        Switch to a different account:\n  \
+        workspace-cli auth switch user2@example.com\n\n\
         Check authentication status:\n  \
         workspace-cli auth status\n\n\
-        Logout and clear stored tokens:\n  \
-        workspace-cli auth logout\n\n\
-        Note: First-time login requires OAuth2 credentials from Google Cloud Console.")]
+        Logout specific account:\n  \
+        workspace-cli auth logout --account user@example.com\n\n\
+        Logout all accounts:\n  \
+        workspace-cli auth logout --all\n\n\
+        Note: Multi-account support allows you to manage multiple Google accounts simultaneously.")]
     Auth {
         #[command(subcommand)]
         command: AuthCommands,
@@ -230,6 +236,9 @@ enum GmailCommands {
         /// Read body from file
         #[arg(long)]
         body_file: Option<String>,
+        /// Send as HTML content
+        #[arg(long)]
+        html: bool,
     },
     /// Create a draft
     Draft {
@@ -242,6 +251,9 @@ enum GmailCommands {
         /// Email body
         #[arg(long)]
         body: Option<String>,
+        /// Send as HTML content
+        #[arg(long)]
+        html: bool,
     },
     /// Permanently delete a message (bypasses trash)
     Delete {
@@ -299,6 +311,9 @@ enum GmailCommands {
         /// Reply-all (include Cc recipients)
         #[arg(long)]
         all: bool,
+        /// Send as HTML content
+        #[arg(long)]
+        html: bool,
     },
     /// Create a draft reply to a message
     ReplyDraft {
@@ -310,6 +325,9 @@ enum GmailCommands {
         /// Reply-all (include Cc recipients)
         #[arg(long)]
         all: bool,
+        /// Send as HTML content
+        #[arg(long)]
+        html: bool,
     },
 }
 
@@ -674,11 +692,28 @@ enum AuthCommands {
         /// Path to OAuth2 client credentials JSON
         #[arg(long)]
         credentials: Option<String>,
+        /// Account identifier (email or name). Defaults to extracted email from OAuth.
+        #[arg(long)]
+        account: Option<String>,
     },
     /// Logout and clear stored tokens
-    Logout,
+    Logout {
+        /// Specific account to logout (defaults to current account)
+        #[arg(long)]
+        account: Option<String>,
+        /// Logout all accounts
+        #[arg(long)]
+        all: bool,
+    },
     /// Show current authentication status
     Status,
+    /// List all authenticated accounts
+    Accounts,
+    /// Switch to a different account
+    Switch {
+        /// Account identifier (email or name)
+        account: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -825,7 +860,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                GmailCommands::Send { to, subject, body, body_file } => {
+                GmailCommands::Send { to, subject, body, body_file, html } => {
                     let body_content = if let Some(file_path) = body_file {
                         std::fs::read_to_string(file_path)?
                     } else {
@@ -841,6 +876,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         in_reply_to: None,
                         references: None,
                         thread_id: None,
+                        is_html: html,
                     };
 
                     match workspace_cli::commands::gmail::send::send_message(&client, params).await {
@@ -861,7 +897,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                GmailCommands::Draft { to, subject, body } => {
+                GmailCommands::Draft { to, subject, body, html } => {
                     let body_content = body.unwrap_or_default();
 
                     let params = workspace_cli::commands::gmail::send::ComposeParams {
@@ -873,6 +909,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         in_reply_to: None,
                         references: None,
                         thread_id: None,
+                        is_html: html,
                     };
 
                     match workspace_cli::commands::gmail::send::create_draft(&client, params).await {
@@ -1006,7 +1043,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                GmailCommands::Reply { id, body, body_file, all } => {
+                GmailCommands::Reply { id, body, body_file, all, html } => {
                     // Fetch original message to get headers
                     let original = match workspace_cli::commands::gmail::get::get_message(&client, &id, "metadata").await {
                         Ok(msg) => msg,
@@ -1048,6 +1085,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         in_reply_to: Some(metadata.in_reply_to),
                         references: Some(metadata.references),
                         thread_id: Some(metadata.thread_id),
+                        is_html: html,
                     };
 
                     match workspace_cli::commands::gmail::send::send_message(&client, params).await {
@@ -1068,7 +1106,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                GmailCommands::ReplyDraft { id, body, all } => {
+                GmailCommands::ReplyDraft { id, body, all, html } => {
                     // Fetch original message to get headers
                     let original = match workspace_cli::commands::gmail::get::get_message(&client, &id, "metadata").await {
                         Ok(msg) => msg,
@@ -1097,6 +1135,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         in_reply_to: Some(metadata.in_reply_to),
                         references: Some(metadata.references),
                         thread_id: Some(metadata.thread_id),
+                        is_html: html,
                     };
 
                     match workspace_cli::commands::gmail::send::create_draft(&client, params).await {
@@ -1986,23 +2025,39 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Commands::Auth { command } => {
             match command {
-                AuthCommands::Login { credentials } => {
+                AuthCommands::Login { credentials, account } => {
                     let creds_path = credentials.map(std::path::PathBuf::from);
-                    let mut tm = token_manager.write().await;
+                    
+                    // Determine account name
+                    let account_name = if let Some(acc) = account {
+                        acc.clone()
+                    } else {
+                        // Use timestamp-based default if not specified
+                        format!("account_{}", std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0))
+                    };
+                    
+                    // Create token manager for specific account
+                    let config = workspace_cli::config::Config::load();
+                    let mut tm = workspace_cli::auth::TokenManager::new_for_account(config.clone(), &account_name);
+                    
                     match tm.login_interactive(creds_path.clone()).await {
                         Ok(()) => {
-                            // Save credentials path to config for future use
+                            // Save account info to config
+                            let mut config = workspace_cli::config::Config::load();
+                            config.auth.current_account = Some(account_name.clone());
                             if let Some(path) = creds_path {
-                                // Canonicalize to absolute path
-                                let abs_path = std::fs::canonicalize(&path).unwrap_or(path);
-                                let mut config = workspace_cli::config::Config::load();
-                                config.auth.credentials_path = Some(abs_path);
-                                if let Err(e) = config.save() {
-                                    eprintln!(r#"{{"status":"warning","message":"Login succeeded but failed to save config: {}"}}"#, e);
-                                }
+                                let abs_path = std::fs::canonicalize(&path).unwrap_or(path.clone());
+                                config.auth.accounts.insert(account_name.clone(), abs_path);
+                                config.auth.credentials_path = Some(path);
+                            }
+                            if let Err(e) = config.save() {
+                                eprintln!(r#"{{"status":"warning","message":"Login succeeded but failed to save config: {}"}}"#, e);
                             }
                             if !quiet {
-                                println!(r#"{{"status":"success","message":"Login successful"}}"#);
+                                println!(r#"{{"status":"success","message":"Login successful","account":"{}"}}"#, account_name);
                             }
                         }
                         Err(e) => {
@@ -2011,25 +2066,135 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                AuthCommands::Logout => {
-                    let mut tm = token_manager.write().await;
-                    match tm.logout() {
-                        Ok(()) => {
-                            if !quiet {
-                                println!(r#"{{"status":"success","message":"Logged out"}}"#);
+                AuthCommands::Logout { account, all } => {
+                    let config = workspace_cli::config::Config::load();
+                    
+                    if all {
+                        // Logout all accounts
+                        match workspace_cli::auth::TokenManager::list_accounts() {
+                            Ok(accounts) => {
+                                let mut any_error = false;
+                                for acc in accounts {
+                                    let mut tm = workspace_cli::auth::TokenManager::new_for_account(config.clone(), &acc);
+                                    if let Err(e) = tm.logout() {
+                                        eprintln!(r#"{{"status":"warning","message":"Failed to logout {}: {}"}}"#, acc, e);
+                                        any_error = true;
+                                    }
+                                }
+                                
+                                // Clear current account from config
+                                let mut config = workspace_cli::config::Config::load();
+                                config.auth.current_account = None;
+                                config.auth.accounts.clear();
+                                let _ = config.save();
+                                
+                                if !quiet {
+                                    if any_error {
+                                        println!(r#"{{"status":"success","message":"Logged out all accounts (with some warnings)"}}"#);
+                                    } else {
+                                        println!(r#"{{"status":"success","message":"Logged out all accounts"}}"#);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                                std::process::exit(1);
                             }
                         }
-                        Err(e) => {
-                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
-                            std::process::exit(1);
+                    } else {
+                        // Logout specific account or current
+                        let account_name = account.or_else(|| config.auth.current_account.clone())
+                            .unwrap_or_else(|| "default".to_string());
+                        
+                        let mut tm = workspace_cli::auth::TokenManager::new_for_account(config.clone(), &account_name);
+                        match tm.logout() {
+                            Ok(()) => {
+                                // Remove from config if it was the current account
+                                let mut config = workspace_cli::config::Config::load();
+                                if config.auth.current_account.as_deref() == Some(&account_name) {
+                                    config.auth.current_account = None;
+                                }
+                                config.auth.accounts.remove(&account_name);
+                                let _ = config.save();
+                                
+                                if !quiet {
+                                    println!(r#"{{"status":"success","message":"Logged out account '{}'"}}"#, account_name);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                                std::process::exit(1);
+                            }
                         }
                     }
                 }
                 AuthCommands::Status => {
+                    let config = workspace_cli::config::Config::load();
                     let tm = token_manager.read().await;
                     let status = tm.status();
+                    
                     if !quiet {
-                        println!("{}", serde_json::to_string_pretty(&status).unwrap());
+                        println!("{{");
+                        println!(r#"  "authenticated": {},"#, status.authenticated);
+                        println!(r#"  "current_account": {},"#, 
+                            config.auth.current_account.as_deref()
+                                .map(|s| format!(r#""{}""#, s))
+                                .unwrap_or_else(|| "null".to_string())
+                        );
+                        println!(r#"  "storage_type": "{}","#, status.storage_type);
+                        println!(r#"  "token_cache_path": "{}""#, status.token_cache_path.display());
+                        println!("}}");
+                    }
+                }
+                AuthCommands::Accounts => {
+                    match workspace_cli::auth::TokenManager::list_accounts() {
+                        Ok(accounts) => {
+                            let config = workspace_cli::config::Config::load();
+                            let current = config.auth.current_account.as_deref();
+                            
+                            if !quiet {
+                                println!("{{");
+                                println!(r#"  "accounts": ["#);
+                                for (i, account) in accounts.iter().enumerate() {
+                                    let is_current = current == Some(account.as_str());
+                                    let comma = if i < accounts.len() - 1 { "," } else { "" };
+                                    println!(r#"    {{"name": "{}", "current": {}}}{}"#, account, is_current, comma);
+                                }
+                                println!("  ]");
+                                println!("}}");
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                AuthCommands::Switch { account } => {
+                    // Verify the account exists
+                    match workspace_cli::auth::TokenManager::list_accounts() {
+                        Ok(accounts) => {
+                            if !accounts.contains(&account) {
+                                eprintln!(r#"{{"status":"error","message":"Account '{}' not found. Use 'workspace-cli auth accounts' to list available accounts."}}"#, account);
+                                std::process::exit(1);
+                            }
+                            
+                            // Update current account in config
+                            let mut config = workspace_cli::config::Config::load();
+                            config.auth.current_account = Some(account.clone());
+                            if let Err(e) = config.save() {
+                                eprintln!(r#"{{"status":"error","message":"Failed to save config: {}"}}"#, e);
+                                std::process::exit(1);
+                            }
+                            
+                            if !quiet {
+                                println!(r#"{{"status":"success","message":"Switched to account '{}'"}}"#, account);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
                     }
                 }
             }
