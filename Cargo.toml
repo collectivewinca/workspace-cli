@@ -22,7 +22,6 @@ url = "2"
 hyper-util = { version = "0.1", features = ["client", "client-legacy"] }
 
 # Auth
-yup-oauth2 = "11"
 keyring = "3"
 
 # Error handling

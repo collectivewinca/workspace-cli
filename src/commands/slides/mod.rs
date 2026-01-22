@@ -1,5 +1,7 @@
 pub mod types;
 pub mod get;
+pub mod create;
+pub mod update;
 
 // Re-export commonly used types
 pub use types::{
@@ -20,4 +22,15 @@ pub use get::{
     extract_page_text,
     get_slide_text,
     get_summary,
+};
+
+// Re-export create functions
+pub use create::create_presentation;
+
+// Re-export update functions
+pub use update::{
+    add_slide,
+    add_text,
+    BatchUpdateResponse,
+    SLIDE_LAYOUTS,
 };

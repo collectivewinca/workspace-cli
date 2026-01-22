@@ -13,6 +13,10 @@ pub use types::{
     UpdateValuesResponse,
     AppendValuesResponse,
     BatchGetValuesResponse,
+    SheetListResponse,
+    SheetInfo,
+    SheetsBatchUpdateRequest,
+    SheetsBatchUpdateResponse,
 };
 
 // Re-export get functions
@@ -32,6 +36,8 @@ pub use update::{
     append_values,
     clear_values,
     parse_values_json,
+    add_sheet,
+    rename_sheet,
 };
 
 // Re-export create functions

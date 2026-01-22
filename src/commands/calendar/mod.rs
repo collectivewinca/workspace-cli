@@ -13,12 +13,20 @@ pub use types::{
     EventList,
     CalendarList,
     CalendarListEntry,
+    EventReminders,
+    ReminderOverride,
 };
 
 pub use list::{
     list_events,
     list_calendars,
+    get_event,
     ListEventsParams,
+    query_free_busy,
+    FreeBusyParams,
+    FreeBusyResponse,
+    CalendarFreeBusy,
+    TimePeriod,
 };
 
 pub use create::{

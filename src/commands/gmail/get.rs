@@ -113,3 +113,70 @@ pub async fn get_message_minimal(client: &ApiClient, id: &str) -> Result<Minimal
         body,
     })
 }
+
+/// Information about an attachment
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentInfo {
+    pub attachment_id: String,
+    pub filename: String,
+    pub mime_type: String,
+    pub size: i64,
+}
+
+/// List attachments in a message
+pub fn list_attachments(message: &Message) -> Vec<AttachmentInfo> {
+    let mut attachments = Vec::new();
+    if let Some(ref payload) = message.payload {
+        collect_attachments(&payload.parts, &mut attachments);
+    }
+    attachments
+}
+
+fn collect_attachments(parts: &[MessagePart], attachments: &mut Vec<AttachmentInfo>) {
+    for part in parts {
+        // Check if this part is an attachment
+        if let Some(ref body) = part.body {
+            if let Some(ref attachment_id) = body.attachment_id {
+                let filename = part.filename.clone().unwrap_or_else(|| "unnamed".to_string());
+                let mime_type = part.mime_type.clone().unwrap_or_else(|| "application/octet-stream".to_string());
+                let size = body.size.unwrap_or(0);
+
+                attachments.push(AttachmentInfo {
+                    attachment_id: attachment_id.clone(),
+                    filename,
+                    mime_type,
+                    size,
+                });
+            }
+        }
+
+        // Recurse into nested parts
+        collect_attachments(&part.parts, attachments);
+    }
+}
+
+/// Downloaded attachment data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AttachmentData {
+    pub size: i64,
+    pub data: String,  // Base64url encoded
+}
+
+/// Download an attachment by ID
+pub async fn get_attachment(client: &ApiClient, message_id: &str, attachment_id: &str) -> Result<AttachmentData> {
+    let path = format!("/users/me/messages/{}/attachments/{}", message_id, attachment_id);
+    client.get(&path).await
+}
+
+/// Download and decode an attachment to bytes
+pub async fn download_attachment(client: &ApiClient, message_id: &str, attachment_id: &str) -> Result<Vec<u8>> {
+    let data = get_attachment(client, message_id, attachment_id).await?;
+
+    // Try decoding as base64url (standard Gmail format)
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    URL_SAFE_NO_PAD.decode(&data.data)
+        .map_err(|e| crate::error::WorkspaceError::Config(
+            format!("Failed to decode attachment: {}", e)
+        ))
+}
