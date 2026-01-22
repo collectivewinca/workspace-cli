@@ -6,6 +6,7 @@ pub mod delete;
 pub mod mkdir;
 pub mod operations;
 pub mod share;
+pub mod watch;
 
 // Re-export commonly used types and functions
 pub use types::{File, FileList, FileMetadata};
@@ -16,3 +17,4 @@ pub use delete::{delete_file, trash_file, untrash_file, empty_trash};
 pub use mkdir::create_folder;
 pub use operations::{move_file, copy_file, rename_file};
 pub use share::{Permission, PermissionList, list_permissions, share_with_user, share_with_anyone, share_with_domain, remove_permission};
+pub use watch::{Channel, WatchFileParams, WatchChangesParams, StartPageTokenResponse, ChangesResponse, Change, get_start_page_token, watch_changes, watch_file, stop_channel, list_changes};

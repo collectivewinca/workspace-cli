@@ -362,6 +362,69 @@ enum GmailCommands {
         #[arg(long, short = 'o')]
         output: String,
     },
+    /// Forward a message to another recipient
+    Forward {
+        /// Message ID to forward
+        id: String,
+        /// Recipient email
+        #[arg(long)]
+        to: String,
+        /// CC recipients (comma-separated)
+        #[arg(long)]
+        cc: Option<String>,
+        /// BCC recipients (comma-separated)
+        #[arg(long)]
+        bcc: Option<String>,
+        /// Optional message to include before the forwarded content
+        #[arg(long)]
+        message: Option<String>,
+    },
+    /// List email filters
+    Filters,
+    /// Create an email filter
+    CreateFilter {
+        /// Match emails from this sender
+        #[arg(long)]
+        from: Option<String>,
+        /// Match emails to this recipient
+        #[arg(long)]
+        to: Option<String>,
+        /// Match emails with this subject
+        #[arg(long)]
+        subject: Option<String>,
+        /// Match emails containing this query (Gmail search syntax)
+        #[arg(long)]
+        query: Option<String>,
+        /// Match emails with attachments
+        #[arg(long)]
+        has_attachment: bool,
+        /// Labels to add (comma-separated label IDs)
+        #[arg(long)]
+        add_labels: Option<String>,
+        /// Labels to remove (comma-separated label IDs)
+        #[arg(long)]
+        remove_labels: Option<String>,
+        /// Forward matching emails to this address
+        #[arg(long)]
+        forward_to: Option<String>,
+        /// Skip the inbox (archive)
+        #[arg(long)]
+        skip_inbox: bool,
+        /// Mark as read
+        #[arg(long)]
+        mark_read: bool,
+        /// Star the message
+        #[arg(long)]
+        star: bool,
+        /// Move to trash
+        #[arg(long)]
+        trash: bool,
+    },
+    /// Delete an email filter
+    DeleteFilter {
+        /// Filter ID to delete
+        id: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -480,6 +543,46 @@ enum DriveCommands {
         /// Permission ID to remove
         permission_id: String,
     },
+    /// Get a start page token for watching changes
+    StartPageToken,
+    /// Watch for changes to Drive (requires webhook URL)
+    Watch {
+        /// Page token from start-page-token command
+        #[arg(long)]
+        page_token: String,
+        /// Webhook URL to receive notifications (must be HTTPS)
+        #[arg(long)]
+        webhook: String,
+        /// Optional verification token
+        #[arg(long)]
+        token: Option<String>,
+    },
+    /// Watch for changes to a specific file
+    WatchFile {
+        /// File ID to watch
+        id: String,
+        /// Webhook URL to receive notifications (must be HTTPS)
+        #[arg(long)]
+        webhook: String,
+        /// Optional verification token
+        #[arg(long)]
+        token: Option<String>,
+    },
+    /// Stop watching for changes
+    StopWatch {
+        /// Channel ID (from watch response)
+        #[arg(long)]
+        channel_id: String,
+        /// Resource ID (from watch response)
+        #[arg(long)]
+        resource_id: String,
+    },
+    /// List recent changes to Drive
+    Changes {
+        /// Page token (from start-page-token or previous changes response)
+        #[arg(long)]
+        page_token: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -564,6 +667,21 @@ enum CalendarCommands {
         /// Calendar ID
         #[arg(long, default_value = "primary")]
         calendar: String,
+    },
+    /// Query free/busy information for calendars
+    FreeBusy {
+        /// Start time (RFC3339)
+        #[arg(long)]
+        time_min: String,
+        /// End time (RFC3339)
+        #[arg(long)]
+        time_max: String,
+        /// Calendar IDs to check (comma-separated, use "primary" for your calendar)
+        #[arg(long, default_value = "primary")]
+        calendars: String,
+        /// Timezone (e.g., "America/New_York")
+        #[arg(long)]
+        timezone: Option<String>,
     },
 }
 
@@ -1428,6 +1546,118 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+                GmailCommands::Forward { id, to, cc, bcc, message } => {
+                    // Get original message
+                    match workspace_cli::commands::gmail::get::get_message(&client, &id, "full").await {
+                        Ok(original) => {
+                            // Extract body
+                            let body = workspace_cli::commands::gmail::get::extract_body(&original).unwrap_or_default();
+
+                            // Build forward metadata
+                            if let Some(metadata) = workspace_cli::commands::gmail::send::extract_forward_metadata(&original, &body) {
+                                let forward_body = workspace_cli::commands::gmail::send::build_forward_body(&metadata, message.as_deref());
+
+                                let params = workspace_cli::commands::gmail::send::ComposeParams {
+                                    to,
+                                    subject: metadata.subject,
+                                    body: forward_body,
+                                    from: None,
+                                    cc,
+                                    bcc,
+                                    in_reply_to: None,
+                                    references: None,
+                                    thread_id: None,
+                                    is_html: false,
+                                    attachments: Vec::new(),
+                                };
+
+                                match workspace_cli::commands::gmail::send::send_message(&client, params).await {
+                                    Ok(msg) => {
+                                        let response = workspace_cli::commands::gmail::types::SendResponse::from_message(&msg);
+                                        formatter.write(&response)?;
+                                    }
+                                    Err(e) => {
+                                        eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                                        std::process::exit(1);
+                                    }
+                                }
+                            } else {
+                                eprintln!(r#"{{"status":"error","message":"Could not extract forward metadata from message"}}"#);
+                                std::process::exit(1);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                GmailCommands::Filters => {
+                    match workspace_cli::commands::gmail::filters::list_filters(&client).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                GmailCommands::CreateFilter { from, to, subject, query, has_attachment, add_labels, remove_labels, forward_to, skip_inbox, mark_read, star, trash } => {
+                    let add_label_ids: Vec<String> = add_labels.map(|l| l.split(',').map(|s| s.trim().to_string()).collect()).unwrap_or_default();
+                    let remove_label_ids: Vec<String> = remove_labels.map(|l| l.split(',').map(|s| s.trim().to_string()).collect()).unwrap_or_default();
+
+                    let filter = workspace_cli::commands::gmail::filters::build_filter(
+                        from.as_deref(),
+                        to.as_deref(),
+                        subject.as_deref(),
+                        query.as_deref(),
+                        if has_attachment { Some(true) } else { None },
+                        add_label_ids,
+                        remove_label_ids,
+                        forward_to.as_deref(),
+                        skip_inbox,
+                        mark_read,
+                        star,
+                        false,
+                        trash,
+                    );
+
+                    match workspace_cli::commands::gmail::filters::create_filter(&client, &filter).await {
+                        Ok(created) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&created)?;
+                            } else {
+                                formatter.write(&created)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                GmailCommands::DeleteFilter { id } => {
+                    match workspace_cli::commands::gmail::filters::delete_filter(&client, &id).await {
+                        Ok(()) => {
+                            if !quiet {
+                                println!(r#"{{"status":"success","message":"Filter deleted"}}"#);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
             }
         }
         Commands::Drive { command } => {
@@ -1723,6 +1953,75 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+                DriveCommands::StartPageToken => {
+                    match workspace_cli::commands::drive::watch::get_start_page_token(&client).await {
+                        Ok(response) => {
+                            formatter.write(&response)?;
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::Watch { page_token, webhook, token } => {
+                    let params = workspace_cli::commands::drive::watch::WatchChangesParams {
+                        page_token,
+                        webhook_url: webhook,
+                        token,
+                        expiration: None,
+                    };
+                    match workspace_cli::commands::drive::watch::watch_changes(&client, params).await {
+                        Ok(channel) => {
+                            formatter.write(&channel)?;
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::WatchFile { id, webhook, token } => {
+                    let params = workspace_cli::commands::drive::watch::WatchFileParams {
+                        file_id: id,
+                        webhook_url: webhook,
+                        token,
+                        expiration: None,
+                    };
+                    match workspace_cli::commands::drive::watch::watch_file(&client, params).await {
+                        Ok(channel) => {
+                            formatter.write(&channel)?;
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::StopWatch { channel_id, resource_id } => {
+                    match workspace_cli::commands::drive::watch::stop_channel(&client, &channel_id, &resource_id).await {
+                        Ok(()) => {
+                            if !quiet {
+                                println!(r#"{{"status":"success","message":"Watch channel stopped"}}"#);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DriveCommands::Changes { page_token } => {
+                    match workspace_cli::commands::drive::watch::list_changes(&client, &page_token).await {
+                        Ok(response) => {
+                            formatter.write(&response)?;
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
             }
         }
         Commands::Calendar { command } => {
@@ -1862,6 +2161,30 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         Ok(()) => {
                             if !quiet {
                                 println!(r#"{{"status":"success","message":"Event deleted"}}"#);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                CalendarCommands::FreeBusy { time_min, time_max, calendars, timezone } => {
+                    let calendar_ids: Vec<String> = calendars.split(',').map(|s| s.trim().to_string()).collect();
+                    let params = workspace_cli::commands::calendar::list::FreeBusyParams {
+                        time_min,
+                        time_max,
+                        calendars: calendar_ids,
+                        time_zone: timezone,
+                    };
+                    match workspace_cli::commands::calendar::list::query_free_busy(&client, params).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
                             }
                         }
                         Err(e) => {

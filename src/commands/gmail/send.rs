@@ -249,6 +249,81 @@ fn sanitize_header(value: &str) -> String {
         .to_string()
 }
 
+/// Metadata extracted from an original message for constructing a forward
+pub struct ForwardMetadata {
+    /// Subject with "Fwd: " prefix if not already present
+    pub subject: String,
+    /// Original sender (From header)
+    pub original_from: String,
+    /// Original date
+    pub original_date: String,
+    /// Original recipients (To header)
+    pub original_to: String,
+    /// Original body content
+    pub original_body: String,
+    /// Gmail thread ID (optional, to keep in same thread)
+    pub thread_id: String,
+    /// Attachments from original message
+    pub attachments: Vec<Attachment>,
+}
+
+/// Extract metadata from an original message needed to construct a forward
+pub fn extract_forward_metadata(message: &Message, body: &str) -> Option<ForwardMetadata> {
+    let payload = message.payload.as_ref()?;
+    let headers = &payload.headers;
+
+    // Helper to get header value by name (case-insensitive)
+    let get = |name: &str| -> Option<String> {
+        headers.iter()
+            .find(|h| h.name.eq_ignore_ascii_case(name))
+            .map(|h| h.value.clone())
+    };
+
+    // Get subject, add "Fwd: " prefix if not already present
+    let original_subject = get("Subject").unwrap_or_default();
+    let subject = if original_subject.to_lowercase().starts_with("fwd:") {
+        original_subject
+    } else {
+        format!("Fwd: {}", original_subject)
+    };
+
+    let original_from = get("From").unwrap_or_else(|| "Unknown".to_string());
+    let original_date = get("Date").unwrap_or_else(|| "Unknown".to_string());
+    let original_to = get("To").unwrap_or_else(|| "Unknown".to_string());
+
+    Some(ForwardMetadata {
+        subject,
+        original_from,
+        original_date,
+        original_to,
+        original_body: body.to_string(),
+        thread_id: message.thread_id.clone(),
+        attachments: Vec::new(), // Attachments handled separately
+    })
+}
+
+/// Build the forwarded message body with original message quoted
+pub fn build_forward_body(metadata: &ForwardMetadata, user_message: Option<&str>) -> String {
+    let mut body = String::new();
+
+    // Add user's message if provided
+    if let Some(msg) = user_message {
+        body.push_str(msg);
+        body.push_str("\n\n");
+    }
+
+    // Add forward header
+    body.push_str("---------- Forwarded message ---------\n");
+    body.push_str(&format!("From: {}\n", metadata.original_from));
+    body.push_str(&format!("Date: {}\n", metadata.original_date));
+    body.push_str(&format!("Subject: {}\n", metadata.subject.trim_start_matches("Fwd: ")));
+    body.push_str(&format!("To: {}\n", metadata.original_to));
+    body.push_str("\n");
+    body.push_str(&metadata.original_body);
+
+    body
+}
+
 /// Load an attachment from a file path
 pub fn load_attachment(path: &str) -> std::io::Result<Attachment> {
     let path = std::path::Path::new(path);

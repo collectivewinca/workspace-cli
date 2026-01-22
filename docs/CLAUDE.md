@@ -48,9 +48,9 @@ src/
 │   ├── retry.rs         # Exponential backoff retry logic
 │   └── batch.rs         # BatchClient for multipart/mixed batch requests
 ├── commands/            # Service implementations
-│   ├── gmail/           # list, get, send (cc/bcc), reply, delete, trash, labels
-│   ├── drive/           # list, upload, download, mkdir, share, etc.
-│   ├── calendar/        # list, get, create (attendees, recurrence, reminders), update, delete
+│   ├── gmail/           # list, get, send (cc/bcc), reply, forward, delete, trash, labels, filters
+│   ├── drive/           # list, upload, download, mkdir, share, watch, changes
+│   ├── calendar/        # list, get, create (attendees, recurrence, reminders), update, delete, free-busy
 │   ├── docs/            # get, append, create, replace, delete
 │   ├── sheets/          # get, update, append, create, clear, list-sheets, delete
 │   ├── slides/          # get, create, add-slide, add-text
@@ -135,6 +135,10 @@ gmail trash <id>
 gmail untrash <id>
 gmail labels
 gmail modify <id> [--add-labels L1,L2] [--remove-labels L3] [--mark-read] [--mark-unread] [--star] [--unstar] [--archive]
+gmail forward <id> --to <email> [--cc <emails>] [--bcc <emails>] [--message <text>]
+gmail filters                                # List all email filters
+gmail create-filter [--from X] [--to Y] [--subject Z] [--query Q] [--add-labels L] [--skip-inbox] [--mark-read] [--star]
+gmail delete-filter <filter-id>
 ```
 
 **CC/BCC:** Use comma-separated emails: `--cc "user1@example.com,user2@example.com"`
@@ -157,6 +161,39 @@ gmail attachment <message-id> <attachment-id> --output downloaded-file.pdf
 - `gmail send/reply/draft` return only `{success, id, threadId}` (~90% reduction)
 - `gmail modify` returns only `{success, id, labels}` (~99% reduction)
 
+**Forward emails:**
+```bash
+# Simple forward
+gmail forward <message-id> --to recipient@example.com
+
+# Forward with note
+gmail forward <message-id> --to user@example.com --message "FYI - see below"
+
+# Forward with CC
+gmail forward <message-id> --to user@example.com --cc "team@example.com"
+```
+
+**Email filters:**
+```bash
+# List all filters
+gmail filters
+
+# Auto-archive emails from newsletters
+gmail create-filter --from "newsletter@example.com" --skip-inbox
+
+# Star and label emails from boss
+gmail create-filter --from "boss@company.com" --star --add-labels "IMPORTANT"
+
+# Mark emails with "urgent" in subject as read and star
+gmail create-filter --subject "urgent" --mark-read --star
+
+# Filter with Gmail search query
+gmail create-filter --query "from:support@vendor.com has:attachment" --add-labels "CATEGORY_UPDATES"
+
+# Delete a filter
+gmail delete-filter <filter-id>
+```
+
 ### Drive Commands
 ```bash
 drive list [--query <q>] [--limit 20] [--parent <folder-id>]
@@ -174,6 +211,35 @@ drive share <id> --email <email> --role reader|writer|commenter
 drive share <id> --anyone --role reader
 drive permissions <id>
 drive unshare <id> <permission-id>
+drive start-page-token                     # Get token for watching changes
+drive watch --page-token <token> --webhook <url>  # Watch Drive changes
+drive watch-file <id> --webhook <url>      # Watch specific file
+drive stop-watch --channel-id <id> --resource-id <id>  # Stop watching
+drive changes --page-token <token>         # List recent changes
+```
+
+**Watch for Drive changes:**
+```bash
+# Step 1: Get a start page token
+drive start-page-token
+# Returns: {"startPageToken": "12345"}
+
+# Step 2: Set up a watch channel (requires HTTPS webhook)
+drive watch --page-token "12345" --webhook "https://your-server.com/webhook"
+# Returns channel info with id and resourceId (save these!)
+
+# Step 3: Your webhook receives notifications when files change
+
+# Step 4: List actual changes when notified
+drive changes --page-token "12345"
+
+# Stop watching when done
+drive stop-watch --channel-id "uuid-from-watch" --resource-id "resource-id-from-watch"
+```
+
+**Watch specific file:**
+```bash
+drive watch-file <file-id> --webhook "https://your-server.com/file-webhook"
 ```
 
 ### Calendar Commands
@@ -183,9 +249,25 @@ calendar get <id> [--calendar primary]     # Get specific event by ID
 calendar create --summary <title> --start <datetime> --end <datetime> [--description <text>] [--attendees <emails>] [--calendar primary] [--recurrence <rule>] [--reminders <spec>]
 calendar update <id> [--summary <title>] [--start <datetime>] [--end <datetime>] [--calendar primary]
 calendar delete <id> [--calendar primary]
+calendar free-busy --time-min <datetime> --time-max <datetime> [--calendars "primary,other@example.com"] [--timezone "America/New_York"]
 ```
 
 **Attendees:** Use comma-separated emails: `--attendees "user1@example.com,user2@example.com"`
+
+**Check availability (free/busy):**
+```bash
+# Check your own availability
+calendar free-busy --time-min "2025-01-20T09:00:00Z" --time-max "2025-01-20T17:00:00Z"
+
+# Check multiple calendars
+calendar free-busy --time-min "2025-01-20T09:00:00Z" --time-max "2025-01-20T17:00:00Z" \
+  --calendars "primary,colleague@company.com,room-a@company.com"
+
+# With timezone
+calendar free-busy --time-min "2025-01-20T09:00:00-05:00" --time-max "2025-01-20T17:00:00-05:00" \
+  --timezone "America/New_York"
+```
+Returns busy time slots for each calendar, useful for finding meeting times.
 
 **Recurring Events:** Use RRULE format (RFC 5545):
 ```bash
@@ -442,6 +524,13 @@ echo '<json>' | batch gmail               # Read from stdin
 | "create presentation" | `slides create --title "..."` |
 | "add slide" | `slides add-slide <id> --layout TITLE_AND_BODY` |
 | "add text to slide" | `slides add-text <id> --page-id p1 --text "..."` |
+| "forward this email" | `gmail forward <id> --to user@example.com` |
+| "create email filter" | `gmail create-filter --from X --skip-inbox` |
+| "list my filters" | `gmail filters` |
+| "check availability" | `calendar free-busy --time-min ... --time-max ...` |
+| "when is X free" | `calendar free-busy --time-min ... --time-max ... --calendars "X@example.com"` |
+| "watch for file changes" | `drive start-page-token` then `drive watch --page-token T --webhook URL` |
+| "list recent drive changes" | `drive changes --page-token T` |
 
 ### ID Extraction
 Google Workspace IDs are found in URLs:
