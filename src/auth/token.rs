@@ -18,7 +18,7 @@ impl TokenManager {
         let account = config.auth.current_account
             .clone()
             .unwrap_or_else(|| "default".to_string());
-        
+
         Self {
             authenticator: None,
             storage: TokenStorage::new(&account),
@@ -60,8 +60,9 @@ impl TokenManager {
             return Err(TokenManagerError::NotAuthenticated);
         }
 
-        // Try to find credentials path
-        let creds_path = self.credentials_path.clone()
+        // Try to find credentials path for this account
+        let creds_path = self.get_credentials_path_for_account()
+            .or_else(|| self.credentials_path.clone())
             .or_else(|| self.config.auth.credentials_path.clone())
             .or_else(|| self.find_credentials_file());
 
@@ -70,18 +71,25 @@ impl TokenManager {
         ))?;
 
         // Restore authenticator from cached tokens
-        let auth = oauth::create_installed_flow_auth(&creds_path, &token_cache)
+        let mut auth = oauth::create_installed_flow_auth(&creds_path, &token_cache)
             .await
             .map_err(TokenManagerError::Auth)?;
 
         // Verify we can get a token before considering authentication successful
-        oauth::get_token(&auth, SCOPES)
+        oauth::get_token(&mut auth, SCOPES)
             .await
             .map_err(TokenManagerError::Auth)?;
 
         self.authenticator = Some(auth);
         self.credentials_path = Some(creds_path);
         Ok(())
+    }
+
+    /// Get credentials path for specific account from config
+    fn get_credentials_path_for_account(&self) -> Option<PathBuf> {
+        self.config.auth.accounts
+            .get(&self.current_account)
+            .cloned()
     }
 
     /// Find credentials file in common locations
@@ -123,12 +131,12 @@ impl TokenManager {
             })?;
         }
 
-        let auth = oauth::create_installed_flow_auth(&creds_path, &token_cache)
+        let mut auth = oauth::create_installed_flow_auth(&creds_path, &token_cache)
             .await
             .map_err(TokenManagerError::Auth)?;
 
-        // Test that we can get a token
-        let token = oauth::get_token(&auth, SCOPES)
+        // Get a token (this will trigger the OAuth flow if needed)
+        let token = oauth::get_token(&mut auth, SCOPES)
             .await
             .map_err(TokenManagerError::Auth)?;
 
@@ -140,7 +148,7 @@ impl TokenManager {
 
         self.storage.store(&StoredToken {
             access_token: token.clone(),
-            refresh_token: None, // yup-oauth2 handles refresh internally
+            refresh_token: None, // Our authenticator handles refresh internally
             expires_at,
         }).map_err(TokenManagerError::Storage)?;
 
@@ -149,33 +157,9 @@ impl TokenManager {
         Ok(())
     }
 
-    /// Initialize with service account
-    pub async fn login_service_account(&mut self, sa_path: Option<PathBuf>) -> Result<(), TokenManagerError> {
-        let sa_path = sa_path
-            .or_else(|| self.config.auth.service_account_path.clone())
-            .or_else(|| std::env::var("GOOGLE_APPLICATION_CREDENTIALS").ok().map(PathBuf::from))
-            .ok_or_else(|| TokenManagerError::MissingCredentials(
-                "No service account path provided. Set GOOGLE_APPLICATION_CREDENTIALS".to_string()
-            ))?;
-
-        // Validate that service account file exists
-        if !sa_path.exists() {
-            return Err(TokenManagerError::MissingCredentials(
-                format!("Service account file not found at: {}", sa_path.display())
-            ));
-        }
-
-        let auth = oauth::create_service_account_auth(&sa_path)
-            .await
-            .map_err(TokenManagerError::Auth)?;
-
-        self.authenticator = Some(auth);
-        Ok(())
-    }
-
     /// Get an access token for API calls
-    pub async fn get_access_token(&self) -> Result<String, TokenManagerError> {
-        let auth = self.authenticator.as_ref()
+    pub async fn get_access_token(&mut self) -> Result<String, TokenManagerError> {
+        let auth = self.authenticator.as_mut()
             .ok_or(TokenManagerError::NotAuthenticated)?;
 
         oauth::get_token(auth, SCOPES)
@@ -184,8 +168,8 @@ impl TokenManager {
     }
 
     /// Get token for specific scopes
-    pub async fn get_token_for_scopes(&self, scopes: &[&str]) -> Result<String, TokenManagerError> {
-        let auth = self.authenticator.as_ref()
+    pub async fn get_token_for_scopes(&mut self, scopes: &[&str]) -> Result<String, TokenManagerError> {
+        let auth = self.authenticator.as_mut()
             .ok_or(TokenManagerError::NotAuthenticated)?;
 
         oauth::get_token(auth, scopes)
@@ -243,29 +227,29 @@ impl TokenManager {
     pub fn list_accounts() -> Result<Vec<String>, TokenManagerError> {
         let config_dir = Config::config_dir()
             .ok_or_else(|| TokenManagerError::Other("Could not determine config directory".into()))?;
-        
+
         let mut accounts = Vec::new();
-        
+
         // Find all token_cache_*.json files
         if let Ok(entries) = std::fs::read_dir(&config_dir) {
             for entry in entries.flatten() {
                 let filename = entry.file_name();
                 let filename_str = filename.to_string_lossy();
-                
+
                 if filename_str.starts_with("token_cache_") && filename_str.ends_with(".json") {
                     // Extract account name from token_cache_{account}.json
                     let account = filename_str
                         .strip_prefix("token_cache_")
                         .and_then(|s| s.strip_suffix(".json"))
                         .map(|s| s.to_string());
-                    
+
                     if let Some(acc) = account {
                         accounts.push(acc);
                     }
                 }
             }
         }
-        
+
         Ok(accounts)
     }
 }

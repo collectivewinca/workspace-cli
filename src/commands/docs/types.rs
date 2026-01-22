@@ -167,6 +167,10 @@ pub struct Request {
     pub insert_text: Option<InsertTextRequest>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub replace_all_text: Option<ReplaceAllTextRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub insert_inline_image: Option<InsertInlineImageRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub insert_table: Option<InsertTableRequest>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -203,4 +207,49 @@ pub struct Location {
 pub struct BatchUpdateResponse {
     pub document_id: String,
     pub replies: Vec<serde_json::Value>,
+}
+
+// Insert inline image request
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InsertInlineImageRequest {
+    /// Location to insert the image
+    pub location: Location,
+    /// URI of the image (must be publicly accessible)
+    pub uri: String,
+    /// Optional object size for the image
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub object_size: Option<Size>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Size {
+    /// Width in EMUs or points
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<Dimension>,
+    /// Height in EMUs or points
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<Dimension>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Dimension {
+    /// Magnitude of the dimension
+    pub magnitude: f64,
+    /// Unit: PT (points), EMU (English Metric Units)
+    pub unit: String,
+}
+
+// Insert table request
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InsertTableRequest {
+    /// Number of rows in the table
+    pub rows: i64,
+    /// Number of columns in the table
+    pub columns: i64,
+    /// Location to insert the table
+    pub location: Location,
 }

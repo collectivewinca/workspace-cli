@@ -48,12 +48,12 @@ src/
 │   ├── retry.rs         # Exponential backoff retry logic
 │   └── batch.rs         # BatchClient for multipart/mixed batch requests
 ├── commands/            # Service implementations
-│   ├── gmail/           # list, get, send, reply, delete, trash, labels
+│   ├── gmail/           # list, get, send (cc/bcc), reply, delete, trash, labels
 │   ├── drive/           # list, upload, download, mkdir, share, etc.
-│   ├── calendar/        # list, create, update, delete events
-│   ├── docs/            # get, append, create, replace
-│   ├── sheets/          # get, update, append, create, clear
-│   ├── slides/          # get presentation/page
+│   ├── calendar/        # list, get, create (attendees, recurrence, reminders), update, delete
+│   ├── docs/            # get, append, create, replace, delete
+│   ├── sheets/          # get, update, append, create, clear, list-sheets, delete
+│   ├── slides/          # get, create, add-slide, add-text
 │   ├── tasks/           # lists, list, create, update, delete
 │   └── batch/           # CLI wrapper for batch API requests
 ├── config/              # Config file handling (~/.config/workspace-cli/)
@@ -124,15 +124,32 @@ ErrorCode::ServerError
 ```bash
 gmail list [--query "is:unread"] [--limit 20] [--label INBOX]
 gmail get <id> [--full]                    # Minimal by default (headers + plain text body)
-gmail send --to <email> --subject <text> --body <text> [--body-file <path>]
-gmail draft --to <email> --subject <text> [--body <text>]
-gmail reply <id> --body <text> [--body-file <path>] [--all]
-gmail reply-draft <id> --body <text> [--all]
+gmail send --to <email> --subject <text> --body <text> [--cc <emails>] [--bcc <emails>] [--body-file <path>] [--html] [--attachment <path>...]
+gmail draft --to <email> --subject <text> [--body <text>] [--cc <emails>] [--bcc <emails>] [--html] [--attachment <path>...]
+gmail attachments <id>                     # List attachments in a message
+gmail attachment <message-id> <attachment-id> --output <path>  # Download attachment
+gmail reply <id> --body <text> [--body-file <path>] [--all] [--html]
+gmail reply-draft <id> --body <text> [--all] [--html]
 gmail delete <id>
 gmail trash <id>
 gmail untrash <id>
 gmail labels
 gmail modify <id> [--add-labels L1,L2] [--remove-labels L3] [--mark-read] [--mark-unread] [--star] [--unstar] [--archive]
+```
+
+**CC/BCC:** Use comma-separated emails: `--cc "user1@example.com,user2@example.com"`
+
+**Attachments:** Add files to emails with `--attachment`:
+```bash
+# Single attachment
+gmail send --to X --subject "Report" --body "See attached" --attachment report.pdf
+
+# Multiple attachments
+gmail send --to X --subject "Files" --body "Attached" --attachment doc.pdf --attachment image.png
+
+# Download attachment from email
+gmail attachments <message-id>    # First, list to get attachment IDs
+gmail attachment <message-id> <attachment-id> --output downloaded-file.pdf
 ```
 
 **Token Optimization (defaults to minimal output):**
@@ -162,9 +179,36 @@ drive unshare <id> <permission-id>
 ### Calendar Commands
 ```bash
 calendar list [--calendar primary] [--time-min 2025-01-01T00:00:00Z] [--time-max ...] [--limit 20] [--sync-token <token>] [--full]
-calendar create --summary <title> --start <datetime> --end <datetime> [--description <text>] [--calendar primary]
+calendar get <id> [--calendar primary]     # Get specific event by ID
+calendar create --summary <title> --start <datetime> --end <datetime> [--description <text>] [--attendees <emails>] [--calendar primary] [--recurrence <rule>] [--reminders <spec>]
 calendar update <id> [--summary <title>] [--start <datetime>] [--end <datetime>] [--calendar primary]
 calendar delete <id> [--calendar primary]
+```
+
+**Attendees:** Use comma-separated emails: `--attendees "user1@example.com,user2@example.com"`
+
+**Recurring Events:** Use RRULE format (RFC 5545):
+```bash
+# Daily for 5 days
+calendar create --summary "Standup" --start ... --end ... --recurrence "RRULE:FREQ=DAILY;COUNT=5"
+
+# Weekly on Mon, Wed, Fri
+calendar create --summary "Team Sync" --start ... --end ... --recurrence "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR"
+
+# Monthly on the 15th
+calendar create --summary "Monthly Review" --start ... --end ... --recurrence "RRULE:FREQ=MONTHLY;BYMONTHDAY=15"
+```
+
+**Event Reminders:** Format is `method:minutes` (comma-separated for multiple):
+```bash
+# Email 30 minutes before
+calendar create --summary "Meeting" --start ... --end ... --reminders "email:30"
+
+# Email 30 min + popup 10 min before
+calendar create --summary "Meeting" --start ... --end ... --reminders "email:30,popup:10"
+
+# Popup 1 hour (60 min) before
+calendar create --summary "Call" --start ... --end ... --reminders "popup:60"
 ```
 
 **Token Optimization:** `calendar list` returns minimal event fields (id, summary, start, end, status) by default (~50% reduction). Use `--full` for attendees, organizer, description, recurrence, etc.
@@ -175,6 +219,30 @@ docs get <id> [--markdown] [--text]        # --text for plain text output
 docs create <title>
 docs append <id> <text>
 docs replace <id> --find <text> --with <replacement> [--match-case]
+docs delete <id>                           # Move document to trash
+docs insert-image <id> --uri <url> [--index N] [--width P] [--height P]  # Insert image
+docs insert-table <id> --rows N --columns M [--index N]                  # Insert table
+docs export <id> -o <path> [-f <format>]   # Export to pdf, docx, txt, html, odt, rtf, epub
+```
+
+**Insert image:** URI must be publicly accessible. Omit `--index` to append at end.
+```bash
+docs insert-image <id> --uri "https://example.com/image.png"             # Append image
+docs insert-image <id> --uri "https://example.com/image.png" --index 1   # Insert at start
+docs insert-image <id> --uri "https://..." --width 200 --height 150      # With size (points)
+```
+
+**Insert table:** Creates an empty table with specified rows and columns.
+```bash
+docs insert-table <id> --rows 3 --columns 4           # Append 3x4 table
+docs insert-table <id> --rows 2 --columns 3 --index 1 # Insert at start
+```
+
+**Export formats:** `pdf` (default), `docx`, `txt`, `html`, `odt`, `rtf`, `epub`
+```bash
+docs export <id> -o report.pdf              # Export as PDF (default)
+docs export <id> -o report.docx -f docx     # Export as Word document
+docs export <id> -o report.txt -f txt       # Export as plain text
 ```
 
 **Token Optimization:** Use `--text` for plain text extraction (~70% reduction vs JSON structure). Use `--markdown` for formatted text.
@@ -186,6 +254,34 @@ sheets create <title>
 sheets update <id> --range "Sheet1!A1:B2" --values '[["Name","Value"],["A","1"]]'
 sheets append <id> --range "Sheet1!A1" --values '[["Row1","Data"]]'
 sheets clear <id> --range "Sheet1!A1:C10"
+sheets list-sheets <id>                    # List all tabs in spreadsheet
+sheets add-sheet <id> --title "New Tab" [--index N]         # Add new tab
+sheets rename-sheet <id> --sheet-id N --title "New Name"    # Rename tab
+sheets delete <id>                         # Move spreadsheet to trash
+sheets export <id> -o <path> [-f <format>] [--sheet <name>]  # Export to csv, xlsx, pdf, ods, tsv, html
+```
+
+**Manage tabs/sheets:**
+```bash
+# List sheets to get sheet IDs
+sheets list-sheets <spreadsheet-id>
+
+# Add new sheet at end
+sheets add-sheet <id> --title "Q2 Data"
+
+# Add new sheet at beginning
+sheets add-sheet <id> --title "Summary" --index 0
+
+# Rename a sheet (use sheet ID from list-sheets)
+sheets rename-sheet <id> --sheet-id 123456789 --title "Q1 Data (Archived)"
+```
+
+**Export formats:** `csv` (default), `xlsx`, `pdf`, `ods`, `tsv`, `html`
+```bash
+sheets export <id> -o data.csv                    # Export as CSV (default, first sheet)
+sheets export <id> -o data.xlsx -f xlsx           # Export as Excel workbook
+sheets export <id> -o data.pdf -f pdf             # Export as PDF
+sheets export <id> -o sheet2.csv --sheet "Sheet2" # Export specific sheet as CSV
 ```
 
 **Token Optimization:** `sheets get` returns just the values array by default (~50% reduction). Use `--full` for range metadata wrapper.
@@ -194,6 +290,54 @@ sheets clear <id> --range "Sheet1!A1:C10"
 ```bash
 slides get <id> [--full]                   # Text extraction by default
 slides page <id> --page 0 [--full]         # Text extraction by default
+slides export <id> -o <path> [-f <format>] # Export to pdf, pptx, odp, txt
+slides create --title <name>               # Create new presentation
+slides add-slide <id> [--index N] [--layout BLANK]   # Add slide to presentation
+slides add-text <id> --page-id <pid> --text "..." [--x 100] [--y 100] [--width 400] [--height 50]
+```
+
+**Create presentations:**
+```bash
+# Create a new blank presentation
+slides create --title "Q1 Report"
+
+# Create and get the presentation ID from the response
+slides create --title "Team Deck" --fields "presentationId"
+```
+
+**Add slides with layouts:**
+```bash
+# Add blank slide at end
+slides add-slide <presentation-id>
+
+# Add slide at specific position (0 = first)
+slides add-slide <id> --index 0
+
+# Add slide with layout
+slides add-slide <id> --layout TITLE_AND_BODY
+slides add-slide <id> --layout TITLE_ONLY
+slides add-slide <id> --layout SECTION_HEADER
+```
+
+**Available layouts:** `BLANK`, `TITLE`, `TITLE_AND_BODY`, `TITLE_AND_TWO_COLUMNS`, `TITLE_ONLY`, `SECTION_HEADER`, `SECTION_TITLE_AND_DESCRIPTION`, `ONE_COLUMN_TEXT`, `MAIN_POINT`, `BIG_NUMBER`, `CAPTION_ONLY`
+
+**Add text to slides:**
+```bash
+# Add text box at position (x=100pt, y=100pt from top-left)
+slides add-text <id> --page-id p1 --text "Hello World"
+
+# Custom position and size (all in points)
+slides add-text <id> --page-id p1 --text "Title" --x 50 --y 50 --width 600 --height 80
+
+# Get page-id from slides get response (objectId field in slides array)
+slides get <id> --fields "slides"
+```
+
+**Export formats:** `pdf` (default), `pptx`, `odp`, `txt`
+```bash
+slides export <id> -o presentation.pdf           # Export as PDF (default)
+slides export <id> -o presentation.pptx -f pptx  # Export as PowerPoint
+slides export <id> -o slides.txt -f txt          # Export text content only
 ```
 
 **Token Optimization:** Returns extracted text content by default (~93% reduction). Use `--full` for complete presentation structure (masters, layouts, transforms, colors).
@@ -252,6 +396,8 @@ echo '<json>' | batch gmail               # Read from stdin
 | "emails from X" | `gmail list --query "from:X"` |
 | "read email <id>" | `gmail get <id>` |
 | "send email to X" | `gmail send --to X --subject "..." --body "..."` |
+| "send email with CC" | `gmail send --to X --cc "Y,Z" --subject "..." --body "..."` |
+| "send email with BCC" | `gmail send --to X --bcc "Y" --subject "..." --body "..."` |
 | "reply to email" | `gmail reply <id> --body "..."` |
 | "reply all" | `gmail reply <id> --body "..." --all` |
 | "draft a reply" | `gmail reply-draft <id> --body "..."` |
@@ -263,16 +409,39 @@ echo '<json>' | batch gmail               # Read from stdin
 | "share with X" | `drive share <id> --email X --role writer` |
 | "who has access" | `drive permissions <id>` |
 | "my calendar" / "events" | `calendar list --time-min <today>` |
+| "get event details" | `calendar get <event-id>` |
 | "schedule meeting" | `calendar create --summary "..." --start ... --end ...` |
+| "invite people to meeting" | `calendar create --summary "..." --start ... --end ... --attendees "a@x.com,b@x.com"` |
 | "read document" | `docs get <id> --markdown` |
 | "add to doc" | `docs append <id> "text"` |
 | "spreadsheet data" | `sheets get <id> --range "Sheet1!A:Z"` |
+| "list sheets/tabs" | `sheets list-sheets <id>` |
+| "delete spreadsheet" | `sheets delete <id>` |
+| "delete document" | `docs delete <id>` |
+| "send email with attachment" | `gmail send --to X --subject "..." --body "..." --attachment file.pdf` |
+| "download attachment" | `gmail attachments <id>` then `gmail attachment <id> <att-id> -o file.pdf` |
+| "export doc as PDF" | `docs export <id> -o doc.pdf` |
+| "export doc as Word" | `docs export <id> -o doc.docx -f docx` |
+| "export sheet as CSV" | `sheets export <id> -o data.csv` |
+| "export sheet as Excel" | `sheets export <id> -o data.xlsx -f xlsx` |
+| "export slides as PDF" | `slides export <id> -o slides.pdf` |
+| "export slides as PowerPoint" | `slides export <id> -o slides.pptx -f pptx` |
+| "insert image in doc" | `docs insert-image <id> --uri "https://..."` |
+| "add table to doc" | `docs insert-table <id> --rows 3 --columns 4` |
+| "add new tab/sheet" | `sheets add-sheet <id> --title "New Sheet"` |
+| "rename sheet/tab" | `sheets rename-sheet <id> --sheet-id N --title "New Name"` |
 | "my tasks" / "todo list" | `tasks list` |
 | "add task" | `tasks create "title"` |
 | "complete task" | `tasks update <id> --complete` |
 | "batch request" / "bulk operation" | `batch gmail/drive/calendar --requests '[...]'` |
 | "get multiple emails at once" | `batch gmail --requests '[{"id":"1","method":"GET","path":"/gmail/v1/users/me/messages/id1"},...]'` |
 | "star all these messages" | `batch gmail --requests '[{"id":"1","method":"POST","path":"/gmail/v1/users/me/messages/id1/modify","body":{"addLabelIds":["STARRED"]}}]'` |
+| "create recurring event" | `calendar create --summary "..." --start ... --end ... --recurrence "RRULE:FREQ=WEEKLY"` |
+| "weekly meeting" | `calendar create --summary "..." --start ... --end ... --recurrence "RRULE:FREQ=WEEKLY;BYDAY=MO"` |
+| "set event reminder" | `calendar create --summary "..." --start ... --end ... --reminders "popup:10"` |
+| "create presentation" | `slides create --title "..."` |
+| "add slide" | `slides add-slide <id> --layout TITLE_AND_BODY` |
+| "add text to slide" | `slides add-text <id> --page-id p1 --text "..."` |
 
 ### ID Extraction
 Google Workspace IDs are found in URLs:

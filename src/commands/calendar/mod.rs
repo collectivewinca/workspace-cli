@@ -13,11 +13,14 @@ pub use types::{
     EventList,
     CalendarList,
     CalendarListEntry,
+    EventReminders,
+    ReminderOverride,
 };
 
 pub use list::{
     list_events,
     list_calendars,
+    get_event,
     ListEventsParams,
 };
 

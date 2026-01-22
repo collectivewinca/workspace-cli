@@ -1,6 +1,6 @@
 use crate::client::ApiClient;
 use crate::error::Result;
-use super::types::{EventList, CalendarList};
+use super::types::{Event, EventList, CalendarList};
 
 pub struct ListEventsParams {
     pub calendar_id: String,
@@ -63,4 +63,11 @@ pub async fn list_events(client: &ApiClient, params: ListEventsParams) -> Result
 
 pub async fn list_calendars(client: &ApiClient) -> Result<CalendarList> {
     client.get("/users/me/calendarList").await
+}
+
+pub async fn get_event(client: &ApiClient, calendar_id: &str, event_id: &str) -> Result<Event> {
+    let path = format!("/calendars/{}/events/{}",
+        urlencoding::encode(calendar_id),
+        urlencoding::encode(event_id));
+    client.get(&path).await
 }

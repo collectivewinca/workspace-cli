@@ -27,6 +27,10 @@ pub use update::{
     append_text,
     insert_text,
     replace_text,
+    insert_image,
+    append_image,
+    insert_table,
+    append_table,
 };
 
 pub use create::create_document;

@@ -227,6 +227,12 @@ enum GmailCommands {
         /// Recipient email
         #[arg(long)]
         to: String,
+        /// CC recipients (comma-separated)
+        #[arg(long)]
+        cc: Option<String>,
+        /// BCC recipients (comma-separated)
+        #[arg(long)]
+        bcc: Option<String>,
         /// Email subject
         #[arg(long)]
         subject: String,
@@ -236,6 +242,9 @@ enum GmailCommands {
         /// Read body from file
         #[arg(long)]
         body_file: Option<String>,
+        /// File attachments (can be specified multiple times)
+        #[arg(long, action = clap::ArgAction::Append)]
+        attachment: Vec<String>,
         /// Send as HTML content
         #[arg(long)]
         html: bool,
@@ -245,12 +254,21 @@ enum GmailCommands {
         /// Recipient email
         #[arg(long)]
         to: String,
+        /// CC recipients (comma-separated)
+        #[arg(long)]
+        cc: Option<String>,
+        /// BCC recipients (comma-separated)
+        #[arg(long)]
+        bcc: Option<String>,
         /// Email subject
         #[arg(long)]
         subject: String,
         /// Email body
         #[arg(long)]
         body: Option<String>,
+        /// File attachments (can be specified multiple times)
+        #[arg(long, action = clap::ArgAction::Append)]
+        attachment: Vec<String>,
         /// Send as HTML content
         #[arg(long)]
         html: bool,
@@ -329,6 +347,21 @@ enum GmailCommands {
         #[arg(long)]
         html: bool,
     },
+    /// List attachments in a message
+    Attachments {
+        /// Message ID
+        id: String,
+    },
+    /// Download an attachment from a message
+    Attachment {
+        /// Message ID
+        message_id: String,
+        /// Attachment ID
+        attachment_id: String,
+        /// Output file path
+        #[arg(long, short = 'o')]
+        output: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -344,6 +377,9 @@ enum DriveCommands {
         /// Parent folder ID
         #[arg(long)]
         parent: Option<String>,
+        /// Order by field
+        #[arg(long)]
+        order_by: Option<String>,
     },
     /// Upload a file
     Upload {
@@ -469,6 +505,14 @@ enum CalendarCommands {
         #[arg(long)]
         full: bool,
     },
+    /// Get a specific event by ID
+    Get {
+        /// Event ID
+        id: String,
+        /// Calendar ID (default: primary)
+        #[arg(long, default_value = "primary")]
+        calendar: String,
+    },
     /// Create an event
     Create {
         /// Event summary/title
@@ -483,9 +527,18 @@ enum CalendarCommands {
         /// Description
         #[arg(long)]
         description: Option<String>,
+        /// Attendee emails (comma-separated)
+        #[arg(long)]
+        attendees: Option<String>,
         /// Calendar ID
         #[arg(long, default_value = "primary")]
         calendar: String,
+        /// Recurrence rule (e.g., "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR")
+        #[arg(long)]
+        recurrence: Option<String>,
+        /// Reminders (e.g., "email:30,popup:10" for email 30 min before and popup 10 min before)
+        #[arg(long)]
+        reminders: Option<String>,
     },
     /// Update an event
     Update {
@@ -553,6 +606,53 @@ enum DocsCommands {
         #[arg(long)]
         match_case: bool,
     },
+    /// Move document to trash
+    Delete {
+        /// Document ID
+        id: String,
+    },
+    /// Insert an image into document
+    InsertImage {
+        /// Document ID
+        id: String,
+        /// Image URL (must be publicly accessible)
+        #[arg(long)]
+        uri: String,
+        /// Insert position (index in document, use 1 for start, or omit to append)
+        #[arg(long)]
+        index: Option<i64>,
+        /// Image width in points
+        #[arg(long)]
+        width: Option<f64>,
+        /// Image height in points
+        #[arg(long)]
+        height: Option<f64>,
+    },
+    /// Insert a table into document
+    InsertTable {
+        /// Document ID
+        id: String,
+        /// Number of rows
+        #[arg(long)]
+        rows: i64,
+        /// Number of columns
+        #[arg(long)]
+        columns: i64,
+        /// Insert position (index in document, omit to append at end)
+        #[arg(long)]
+        index: Option<i64>,
+    },
+    /// Export document to file
+    Export {
+        /// Document ID
+        id: String,
+        /// Output file path
+        #[arg(long, short)]
+        output: String,
+        /// Export format: pdf, docx, txt, html, odt, rtf, epub
+        #[arg(long, short, default_value = "pdf")]
+        format: String,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -603,6 +703,52 @@ enum SheetsCommands {
         #[arg(long)]
         range: String,
     },
+    /// List all sheets (tabs) in a spreadsheet
+    ListSheets {
+        /// Spreadsheet ID
+        id: String,
+    },
+    /// Move spreadsheet to trash
+    Delete {
+        /// Spreadsheet ID
+        id: String,
+    },
+    /// Add a new sheet (tab) to a spreadsheet
+    AddSheet {
+        /// Spreadsheet ID
+        id: String,
+        /// Name for the new sheet
+        #[arg(long)]
+        title: String,
+        /// Position index (0 = first, omit for end)
+        #[arg(long)]
+        index: Option<i64>,
+    },
+    /// Rename a sheet (tab) in a spreadsheet
+    RenameSheet {
+        /// Spreadsheet ID
+        id: String,
+        /// Sheet ID (numeric, from list-sheets command)
+        #[arg(long)]
+        sheet_id: i64,
+        /// New name for the sheet
+        #[arg(long)]
+        title: String,
+    },
+    /// Export spreadsheet to file
+    Export {
+        /// Spreadsheet ID
+        id: String,
+        /// Output file path
+        #[arg(long, short)]
+        output: String,
+        /// Export format: csv, xlsx, pdf, ods, tsv, html
+        #[arg(long, short, default_value = "csv")]
+        format: String,
+        /// Sheet name for CSV/TSV export (optional, exports first sheet by default)
+        #[arg(long)]
+        sheet: Option<String>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -625,6 +771,57 @@ enum SlidesCommands {
         /// Return full page structure (includes transforms, sizes, etc.)
         #[arg(long)]
         full: bool,
+    },
+    /// Export presentation to file
+    Export {
+        /// Presentation ID
+        id: String,
+        /// Output file path
+        #[arg(long, short)]
+        output: String,
+        /// Export format: pdf, pptx, odp, txt
+        #[arg(long, short, default_value = "pdf")]
+        format: String,
+    },
+    /// Create a new presentation
+    Create {
+        /// Presentation title
+        #[arg(long)]
+        title: String,
+    },
+    /// Add a slide to a presentation
+    AddSlide {
+        /// Presentation ID
+        id: String,
+        /// Slide index (0-based position to insert)
+        #[arg(long)]
+        index: Option<i32>,
+        /// Layout: BLANK, TITLE, TITLE_AND_BODY, TITLE_ONLY, etc.
+        #[arg(long, default_value = "BLANK")]
+        layout: String,
+    },
+    /// Add text to a slide
+    AddText {
+        /// Presentation ID
+        id: String,
+        /// Page/slide object ID
+        #[arg(long)]
+        page_id: String,
+        /// Text content
+        #[arg(long)]
+        text: String,
+        /// X position in points (from left edge)
+        #[arg(long, default_value = "100")]
+        x: f64,
+        /// Y position in points (from top edge)
+        #[arg(long, default_value = "100")]
+        y: f64,
+        /// Width in points
+        #[arg(long, default_value = "400")]
+        width: f64,
+        /// Height in points
+        #[arg(long, default_value = "50")]
+        height: f64,
     },
 }
 
@@ -801,7 +998,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                     };
                     // Get access token for batch metadata request
                     let access_token = {
-                        let tm = token_manager.read().await;
+                        let mut tm = token_manager.write().await;
                         tm.get_access_token().await.map_err(|e| {
                             eprintln!(r#"{{"status":"error","message":"Failed to get token: {}"}}"#, e);
                             std::process::exit(1);
@@ -860,23 +1057,37 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                GmailCommands::Send { to, subject, body, body_file, html } => {
+                GmailCommands::Send { to, cc, bcc, subject, body, body_file, attachment, html } => {
                     let body_content = if let Some(file_path) = body_file {
                         std::fs::read_to_string(file_path)?
                     } else {
                         body.unwrap_or_default()
                     };
 
+                    // Load attachments from file paths
+                    let mut attachments = Vec::new();
+                    for path in attachment {
+                        match workspace_cli::commands::gmail::send::load_attachment(&path) {
+                            Ok(att) => attachments.push(att),
+                            Err(e) => {
+                                eprintln!(r#"{{"status":"error","message":"Failed to load attachment '{}': {}"}}"#, path, e);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+
                     let params = workspace_cli::commands::gmail::send::ComposeParams {
                         to,
                         subject,
                         body: body_content,
                         from: None,
-                        cc: None,
+                        cc,
+                        bcc,
                         in_reply_to: None,
                         references: None,
                         thread_id: None,
                         is_html: html,
+                        attachments,
                     };
 
                     match workspace_cli::commands::gmail::send::send_message(&client, params).await {
@@ -897,19 +1108,33 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                GmailCommands::Draft { to, subject, body, html } => {
+                GmailCommands::Draft { to, cc, bcc, subject, body, attachment, html } => {
                     let body_content = body.unwrap_or_default();
+
+                    // Load attachments from file paths
+                    let mut attachments = Vec::new();
+                    for path in attachment {
+                        match workspace_cli::commands::gmail::send::load_attachment(&path) {
+                            Ok(att) => attachments.push(att),
+                            Err(e) => {
+                                eprintln!(r#"{{"status":"error","message":"Failed to load attachment '{}': {}"}}"#, path, e);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
 
                     let params = workspace_cli::commands::gmail::send::ComposeParams {
                         to,
                         subject,
                         body: body_content,
                         from: None,
-                        cc: None,
+                        cc,
+                        bcc,
                         in_reply_to: None,
                         references: None,
                         thread_id: None,
                         is_html: html,
+                        attachments,
                     };
 
                     match workspace_cli::commands::gmail::send::create_draft(&client, params).await {
@@ -1082,10 +1307,12 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         body: body_content,
                         from: None,
                         cc: if all { metadata.cc } else { None },
+                        bcc: None,
                         in_reply_to: Some(metadata.in_reply_to),
                         references: Some(metadata.references),
                         thread_id: Some(metadata.thread_id),
                         is_html: html,
+                        attachments: Vec::new(),
                     };
 
                     match workspace_cli::commands::gmail::send::send_message(&client, params).await {
@@ -1132,10 +1359,12 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         body: body.unwrap_or_default(),
                         from: None,
                         cc: if all { metadata.cc } else { None },
+                        bcc: None,
                         in_reply_to: Some(metadata.in_reply_to),
                         references: Some(metadata.references),
                         thread_id: Some(metadata.thread_id),
                         is_html: html,
+                        attachments: Vec::new(),
                     };
 
                     match workspace_cli::commands::gmail::send::create_draft(&client, params).await {
@@ -1161,6 +1390,44 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+                GmailCommands::Attachments { id } => {
+                    // Get the message to extract attachment info
+                    match workspace_cli::commands::gmail::get::get_message(&client, &id, "full").await {
+                        Ok(message) => {
+                            let attachments = workspace_cli::commands::gmail::get::list_attachments(&message);
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&attachments)?;
+                            } else {
+                                formatter.write(&attachments)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                GmailCommands::Attachment { message_id, attachment_id, output } => {
+                    match workspace_cli::commands::gmail::get::download_attachment(&client, &message_id, &attachment_id).await {
+                        Ok(data) => {
+                            std::fs::write(&output, &data)?;
+                            let response = serde_json::json!({
+                                "success": true,
+                                "path": output,
+                                "size": data.len()
+                            });
+                            if !quiet {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
             }
         }
         Commands::Drive { command } => {
@@ -1177,7 +1444,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let mut formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet);
 
             match command {
-                DriveCommands::List { query, limit, parent } => {
+                DriveCommands::List { query, limit, parent, order_by } => {
                     // Build query with optional parent filter
                     let final_query = match (query, parent) {
                         (Some(q), Some(p)) => Some(format!("'{}' in parents and ({})", p, q)),
@@ -1191,7 +1458,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         max_results: limit,
                         page_token: None,
                         fields: None,
-                        order_by: None,
+                        order_by,
                     };
                     match workspace_cli::commands::drive::list::list_files(&client, params).await {
                         Ok(response) => {
@@ -1212,7 +1479,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 DriveCommands::Upload { file, parent, name } => {
                     // Get access token for direct upload
                     let token = {
-                        let tm = token_manager.read().await;
+                        let mut tm = token_manager.write().await;
                         tm.get_access_token().await.map_err(|e| {
                             eprintln!(r#"{{"status":"error","message":"Failed to get token: {}"}}"#, e);
                             std::process::exit(1);
@@ -1245,7 +1512,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 DriveCommands::Download { id, output } => {
                     // Get access token for direct download
                     let token = {
-                        let tm = token_manager.read().await;
+                        let mut tm = token_manager.write().await;
                         tm.get_access_token().await.map_err(|e| {
                             eprintln!(r#"{{"status":"error","message":"Failed to get token: {}"}}"#, e);
                             std::process::exit(1);
@@ -1512,7 +1779,27 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                CalendarCommands::Create { summary, start, end, description, calendar } => {
+                CalendarCommands::Get { id, calendar } => {
+                    match workspace_cli::commands::calendar::get_event(&client, &calendar, &id).await {
+                        Ok(event) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&event)?;
+                            } else {
+                                formatter.write(&event)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                CalendarCommands::Create { summary, start, end, description, attendees, calendar, recurrence, reminders } => {
+                    let attendee_list = attendees.map(|a| {
+                        a.split(',').map(|s| s.trim().to_string()).collect()
+                    });
                     let params = workspace_cli::commands::calendar::create::CreateEventParams {
                         calendar_id: calendar,
                         summary,
@@ -1520,8 +1807,10 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         end,
                         description,
                         location: None,
-                        attendees: None,
+                        attendees: attendee_list,
                         time_zone: None,
+                        recurrence,
+                        reminders,
                     };
 
                     match workspace_cli::commands::calendar::create::create_event(&client, params).await {
@@ -1672,6 +1961,117 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+                DocsCommands::Delete { id } => {
+                    // Use Drive API to trash the document
+                    let drive_client = ApiClient::drive(token_manager.clone());
+                    match workspace_cli::commands::drive::delete::trash_file(&drive_client, &id).await {
+                        Ok(response) => {
+                            let result = serde_json::json!({
+                                "success": true,
+                                "id": response.id,
+                                "trashed": true
+                            });
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&result)?;
+                            } else {
+                                formatter.write(&result)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DocsCommands::InsertImage { id, uri, index, width, height } => {
+                    let result = if let Some(idx) = index {
+                        workspace_cli::commands::docs::update::insert_image(&client, &id, &uri, idx, width, height).await
+                    } else {
+                        workspace_cli::commands::docs::update::append_image(&client, &id, &uri, width, height).await
+                    };
+
+                    match result {
+                        Ok(response) => {
+                            let result = serde_json::json!({
+                                "success": true,
+                                "documentId": response.document_id,
+                                "uri": uri
+                            });
+                            formatter.write(&result)?;
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DocsCommands::InsertTable { id, rows, columns, index } => {
+                    let result = if let Some(idx) = index {
+                        workspace_cli::commands::docs::update::insert_table(&client, &id, rows, columns, idx).await
+                    } else {
+                        workspace_cli::commands::docs::update::append_table(&client, &id, rows, columns).await
+                    };
+
+                    match result {
+                        Ok(response) => {
+                            let result = serde_json::json!({
+                                "success": true,
+                                "documentId": response.document_id,
+                                "rows": rows,
+                                "columns": columns
+                            });
+                            formatter.write(&result)?;
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                DocsCommands::Export { id, output, format: export_format } => {
+                    // Map format to MIME type
+                    let mime_type = match export_format.to_lowercase().as_str() {
+                        "pdf" => "application/pdf",
+                        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                        "txt" | "text" => "text/plain",
+                        "html" => "text/html",
+                        "odt" => "application/vnd.oasis.opendocument.text",
+                        "rtf" => "application/rtf",
+                        "epub" => "application/epub+zip",
+                        _ => {
+                            eprintln!(r#"{{"status":"error","message":"Unsupported format '{}'. Supported: pdf, docx, txt, html, odt, rtf, epub"}}"#, export_format);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    let access_token = {
+                        let mut tm = token_manager.write().await;
+                        tm.get_access_token().await.map_err(|e| {
+                            eprintln!(r#"{{"status":"error","message":"Failed to get token: {}"}}"#, e);
+                            std::process::exit(1);
+                        }).unwrap()
+                    };
+
+                    let output_path = std::path::Path::new(&output);
+                    match workspace_cli::commands::drive::download::export_file(&access_token, &id, mime_type, output_path).await {
+                        Ok(bytes) => {
+                            let result = serde_json::json!({
+                                "success": true,
+                                "id": id,
+                                "format": export_format,
+                                "output": output,
+                                "bytes": bytes
+                            });
+                            formatter.write(&result)?;
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
             }
         }
         Commands::Sheets { command } => {
@@ -1808,6 +2208,142 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
+                SheetsCommands::ListSheets { id } => {
+                    match workspace_cli::commands::sheets::get_spreadsheet(&client, &id).await {
+                        Ok(spreadsheet) => {
+                            let response = workspace_cli::commands::sheets::SheetListResponse::from_spreadsheet(&spreadsheet);
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::Delete { id } => {
+                    // Use Drive API to trash the spreadsheet
+                    let drive_client = ApiClient::drive(token_manager.clone());
+                    match workspace_cli::commands::drive::delete::trash_file(&drive_client, &id).await {
+                        Ok(response) => {
+                            let result = serde_json::json!({
+                                "success": true,
+                                "id": response.id,
+                                "trashed": true
+                            });
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&result)?;
+                            } else {
+                                formatter.write(&result)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::AddSheet { id, title, index } => {
+                    match workspace_cli::commands::sheets::update::add_sheet(&client, &id, &title, index).await {
+                        Ok(response) => {
+                            // Extract the new sheet info from the reply
+                            let sheet_info = response.replies.first()
+                                .and_then(|r| r.get("addSheet"))
+                                .and_then(|s| s.get("properties"));
+
+                            let result = serde_json::json!({
+                                "success": true,
+                                "spreadsheetId": response.spreadsheet_id,
+                                "title": title,
+                                "sheetId": sheet_info.and_then(|p| p.get("sheetId")),
+                                "index": sheet_info.and_then(|p| p.get("index"))
+                            });
+                            formatter.write(&result)?;
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::RenameSheet { id, sheet_id, title } => {
+                    match workspace_cli::commands::sheets::update::rename_sheet(&client, &id, sheet_id, &title).await {
+                        Ok(response) => {
+                            let result = serde_json::json!({
+                                "success": true,
+                                "spreadsheetId": response.spreadsheet_id,
+                                "sheetId": sheet_id,
+                                "newTitle": title
+                            });
+                            formatter.write(&result)?;
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SheetsCommands::Export { id, output, format: export_format, sheet } => {
+                    // Map format to MIME type
+                    // Note: For CSV/TSV, sheet parameter can specify which sheet to export
+                    let mime_type = match export_format.to_lowercase().as_str() {
+                        "csv" => "text/csv",
+                        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        "pdf" => "application/pdf",
+                        "ods" => "application/vnd.oasis.opendocument.spreadsheet",
+                        "tsv" => "text/tab-separated-values",
+                        "html" => "text/html",
+                        _ => {
+                            eprintln!(r#"{{"status":"error","message":"Unsupported format '{}'. Supported: csv, xlsx, pdf, ods, tsv, html"}}"#, export_format);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    let access_token = {
+                        let mut tm = token_manager.write().await;
+                        tm.get_access_token().await.map_err(|e| {
+                            eprintln!(r#"{{"status":"error","message":"Failed to get token: {}"}}"#, e);
+                            std::process::exit(1);
+                        }).unwrap()
+                    };
+
+                    // For CSV/TSV exports with a specific sheet, we need to use the gid parameter
+                    let export_id = if let Some(ref sheet_name) = sheet {
+                        // For sheet-specific export, we'd need to get the sheet ID first
+                        // For now, just use the sheet name in the URL
+                        format!("{}?gid={}", id, sheet_name)
+                    } else {
+                        id.clone()
+                    };
+
+                    let output_path = std::path::Path::new(&output);
+                    match workspace_cli::commands::drive::download::export_file(&access_token, &export_id, mime_type, output_path).await {
+                        Ok(bytes) => {
+                            let mut result = serde_json::json!({
+                                "success": true,
+                                "id": id,
+                                "format": export_format,
+                                "output": output,
+                                "bytes": bytes
+                            });
+                            if let Some(ref s) = sheet {
+                                result["sheet"] = serde_json::json!(s);
+                            }
+                            formatter.write(&result)?;
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
             }
         }
         Commands::Slides { command } => {
@@ -1880,6 +2416,96 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                                 } else {
                                     println!("{}", text);
                                 }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SlidesCommands::Export { id, output, format: export_format } => {
+                    // Map format to MIME type
+                    let mime_type = match export_format.to_lowercase().as_str() {
+                        "pdf" => "application/pdf",
+                        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                        "odp" => "application/vnd.oasis.opendocument.presentation",
+                        "txt" | "text" => "text/plain",
+                        _ => {
+                            eprintln!(r#"{{"status":"error","message":"Unsupported format '{}'. Supported: pdf, pptx, odp, txt"}}"#, export_format);
+                            std::process::exit(1);
+                        }
+                    };
+
+                    let access_token = {
+                        let mut tm = token_manager.write().await;
+                        tm.get_access_token().await.map_err(|e| {
+                            eprintln!(r#"{{"status":"error","message":"Failed to get token: {}"}}"#, e);
+                            std::process::exit(1);
+                        }).unwrap()
+                    };
+
+                    let output_path = std::path::Path::new(&output);
+                    match workspace_cli::commands::drive::download::export_file(&access_token, &id, mime_type, output_path).await {
+                        Ok(bytes) => {
+                            let result = serde_json::json!({
+                                "success": true,
+                                "id": id,
+                                "format": export_format,
+                                "output": output,
+                                "bytes": bytes
+                            });
+                            formatter.write(&result)?;
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SlidesCommands::Create { title } => {
+                    match workspace_cli::commands::slides::create_presentation(&client, &title).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SlidesCommands::AddSlide { id, index, layout } => {
+                    match workspace_cli::commands::slides::add_slide(&client, &id, index, Some(&layout)).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(r#"{{"status":"error","message":"{}"}}"#, e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                SlidesCommands::AddText { id, page_id, text, x, y, width, height } => {
+                    match workspace_cli::commands::slides::add_text(&client, &id, &page_id, &text, x, y, width, height).await {
+                        Ok(response) => {
+                            if let Some(ref output_path) = cli.output {
+                                let file = std::fs::File::create(output_path)?;
+                                let mut file_formatter = Formatter::new(format).with_fields(fields.clone()).with_quiet(quiet).with_writer(file);
+                                file_formatter.write(&response)?;
+                            } else {
+                                formatter.write(&response)?;
                             }
                         }
                         Err(e) => {

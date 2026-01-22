@@ -1,6 +1,6 @@
 use crate::client::ApiClient;
 use crate::error::Result;
-use super::types::{Event, EventDateTime, Attendee};
+use super::types::{Event, EventDateTime, Attendee, EventReminders, ReminderOverride};
 
 pub struct CreateEventParams {
     pub calendar_id: String,
@@ -11,6 +11,10 @@ pub struct CreateEventParams {
     pub location: Option<String>,
     pub attendees: Option<Vec<String>>,
     pub time_zone: Option<String>,
+    /// Recurrence rule (e.g., "RRULE:FREQ=WEEKLY;BYDAY=MO,WE,FR")
+    pub recurrence: Option<String>,
+    /// Reminders (e.g., "email:30,popup:10" for email 30 min before and popup 10 min before)
+    pub reminders: Option<String>,
 }
 
 pub async fn create_event(client: &ApiClient, params: CreateEventParams) -> Result<Event> {
@@ -54,6 +58,28 @@ pub async fn create_event(client: &ApiClient, params: CreateEventParams) -> Resu
         })
         .collect();
 
+    // Parse recurrence rule
+    let recurrence = params.recurrence.map(|r| vec![r]);
+
+    // Parse reminders (format: "email:30,popup:10")
+    let reminders = params.reminders.map(|r| {
+        let overrides: Vec<ReminderOverride> = r.split(',')
+            .filter_map(|part| {
+                let mut parts = part.trim().split(':');
+                let method = parts.next()?;
+                let minutes = parts.next()?.parse().ok()?;
+                Some(ReminderOverride {
+                    method: method.to_string(),
+                    minutes,
+                })
+            })
+            .collect();
+        EventReminders {
+            use_default: false,
+            overrides,
+        }
+    });
+
     let event = Event {
         id: None,
         summary: Some(params.summary),
@@ -67,7 +93,8 @@ pub async fn create_event(client: &ApiClient, params: CreateEventParams) -> Resu
         html_link: None,
         created: None,
         updated: None,
-        recurrence: None,
+        recurrence,
+        reminders,
     };
 
     let path = format!("/calendars/{}/events", urlencoding::encode(&params.calendar_id));
