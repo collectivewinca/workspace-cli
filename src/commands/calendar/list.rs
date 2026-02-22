@@ -1,6 +1,6 @@
 use crate::client::ApiClient;
 use crate::error::Result;
-use super::types::{EventList, CalendarList};
+use super::types::{Event, EventList, CalendarList};
 
 pub struct ListEventsParams {
     pub calendar_id: String,
@@ -63,4 +63,77 @@ pub async fn list_events(client: &ApiClient, params: ListEventsParams) -> Result
 
 pub async fn list_calendars(client: &ApiClient) -> Result<CalendarList> {
     client.get("/users/me/calendarList").await
+}
+
+pub async fn get_event(client: &ApiClient, calendar_id: &str, event_id: &str) -> Result<Event> {
+    let path = format!("/calendars/{}/events/{}",
+        urlencoding::encode(calendar_id),
+        urlencoding::encode(event_id));
+    client.get(&path).await
+}
+
+/// Parameters for free/busy query
+pub struct FreeBusyParams {
+    /// Start of the time range (RFC3339)
+    pub time_min: String,
+    /// End of the time range (RFC3339)
+    pub time_max: String,
+    /// Calendar IDs to check (use "primary" for the user's primary calendar)
+    pub calendars: Vec<String>,
+    /// Optional timezone (e.g., "America/New_York")
+    pub time_zone: Option<String>,
+}
+
+/// Free/busy query response
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FreeBusyResponse {
+    pub kind: Option<String>,
+    pub time_min: Option<String>,
+    pub time_max: Option<String>,
+    #[serde(default)]
+    pub calendars: std::collections::HashMap<String, CalendarFreeBusy>,
+}
+
+/// Free/busy info for a single calendar
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CalendarFreeBusy {
+    #[serde(default)]
+    pub busy: Vec<TimePeriod>,
+    #[serde(default)]
+    pub errors: Vec<FreeBusyError>,
+}
+
+/// A busy time period
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TimePeriod {
+    pub start: String,
+    pub end: String,
+}
+
+/// Error info for a calendar query
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FreeBusyError {
+    pub domain: Option<String>,
+    pub reason: Option<String>,
+}
+
+/// Query free/busy information for calendars
+pub async fn query_free_busy(client: &ApiClient, params: FreeBusyParams) -> Result<FreeBusyResponse> {
+    let items: Vec<serde_json::Value> = params.calendars.iter()
+        .map(|id| serde_json::json!({ "id": id }))
+        .collect();
+
+    let mut body = serde_json::json!({
+        "timeMin": params.time_min,
+        "timeMax": params.time_max,
+        "items": items
+    });
+
+    if let Some(tz) = params.time_zone {
+        body["timeZone"] = serde_json::json!(tz);
+    }
+
+    client.post("/freeBusy", &body).await
 }

@@ -4,12 +4,20 @@ use crate::utils::base64::encode_base64url_string;
 use super::types::Message;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 
+/// Represents a file attachment
+pub struct Attachment {
+    pub filename: String,
+    pub content: Vec<u8>,
+    pub mime_type: String,
+}
+
 pub struct ComposeParams {
     pub to: String,
     pub subject: String,
     pub body: String,
     pub from: Option<String>,
     pub cc: Option<String>,
+    pub bcc: Option<String>,
     /// Message-ID of parent message (for replies)
     pub in_reply_to: Option<String>,
     /// Space-separated Message-IDs of thread history (for replies)
@@ -18,6 +26,8 @@ pub struct ComposeParams {
     pub thread_id: Option<String>,
     /// Whether the body is HTML content
     pub is_html: bool,
+    /// File attachments
+    pub attachments: Vec<Attachment>,
 }
 
 pub async fn send_message(client: &ApiClient, params: ComposeParams) -> Result<Message> {
@@ -81,6 +91,11 @@ fn build_raw_email(params: &ComposeParams) -> String {
         email.push_str(&format!("Cc: {}\r\n", sanitize_header(cc)));
     }
 
+    // Sanitize and add Bcc header if present
+    if let Some(ref bcc) = params.bcc {
+        email.push_str(&format!("Bcc: {}\r\n", sanitize_header(bcc)));
+    }
+
     // Add In-Reply-To header for replies (RFC 5322)
     if let Some(ref in_reply_to) = params.in_reply_to {
         email.push_str(&format!("In-Reply-To: {}\r\n", sanitize_header(in_reply_to)));
@@ -102,16 +117,56 @@ fn build_raw_email(params: &ComposeParams) -> String {
     }
 
     email.push_str("MIME-Version: 1.0\r\n");
-    
-    // Set Content-Type based on whether body is HTML or plain text
-    if params.is_html {
-        email.push_str("Content-Type: text/html; charset=utf-8\r\n");
+
+    // If we have attachments, use multipart/mixed format
+    if !params.attachments.is_empty() {
+        let boundary = format!("boundary_{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
+        email.push_str(&format!("Content-Type: multipart/mixed; boundary=\"{}\"\r\n", boundary));
+        email.push_str("\r\n");
+
+        // Body part
+        email.push_str(&format!("--{}\r\n", boundary));
+        if params.is_html {
+            email.push_str("Content-Type: text/html; charset=utf-8\r\n");
+        } else {
+            email.push_str("Content-Type: text/plain; charset=utf-8\r\n");
+        }
+        email.push_str("\r\n");
+        email.push_str(&params.body);
+        email.push_str("\r\n");
+
+        // Attachment parts
+        for attachment in &params.attachments {
+            email.push_str(&format!("--{}\r\n", boundary));
+            email.push_str(&format!("Content-Type: {}; name=\"{}\"\r\n",
+                attachment.mime_type,
+                sanitize_header(&attachment.filename)));
+            email.push_str("Content-Transfer-Encoding: base64\r\n");
+            email.push_str(&format!("Content-Disposition: attachment; filename=\"{}\"\r\n",
+                sanitize_header(&attachment.filename)));
+            email.push_str("\r\n");
+
+            // Base64 encode the attachment content with line breaks every 76 chars
+            let encoded = BASE64_STANDARD.encode(&attachment.content);
+            for chunk in encoded.as_bytes().chunks(76) {
+                email.push_str(std::str::from_utf8(chunk).unwrap_or(""));
+                email.push_str("\r\n");
+            }
+        }
+
+        // Closing boundary
+        email.push_str(&format!("--{}--\r\n", boundary));
     } else {
-        email.push_str("Content-Type: text/plain; charset=utf-8\r\n");
+        // No attachments - simple email
+        if params.is_html {
+            email.push_str("Content-Type: text/html; charset=utf-8\r\n");
+        } else {
+            email.push_str("Content-Type: text/plain; charset=utf-8\r\n");
+        }
+
+        email.push_str("\r\n");
+        email.push_str(&params.body);
     }
-    
-    email.push_str("\r\n");
-    email.push_str(&params.body);
 
     email
 }
@@ -192,4 +247,125 @@ fn sanitize_header(value: &str) -> String {
         .replace('\n', " ")
         .trim()
         .to_string()
+}
+
+/// Metadata extracted from an original message for constructing a forward
+pub struct ForwardMetadata {
+    /// Subject with "Fwd: " prefix if not already present
+    pub subject: String,
+    /// Original sender (From header)
+    pub original_from: String,
+    /// Original date
+    pub original_date: String,
+    /// Original recipients (To header)
+    pub original_to: String,
+    /// Original body content
+    pub original_body: String,
+    /// Gmail thread ID (optional, to keep in same thread)
+    pub thread_id: String,
+    /// Attachments from original message
+    pub attachments: Vec<Attachment>,
+}
+
+/// Extract metadata from an original message needed to construct a forward
+pub fn extract_forward_metadata(message: &Message, body: &str) -> Option<ForwardMetadata> {
+    let payload = message.payload.as_ref()?;
+    let headers = &payload.headers;
+
+    // Helper to get header value by name (case-insensitive)
+    let get = |name: &str| -> Option<String> {
+        headers.iter()
+            .find(|h| h.name.eq_ignore_ascii_case(name))
+            .map(|h| h.value.clone())
+    };
+
+    // Get subject, add "Fwd: " prefix if not already present
+    let original_subject = get("Subject").unwrap_or_default();
+    let subject = if original_subject.to_lowercase().starts_with("fwd:") {
+        original_subject
+    } else {
+        format!("Fwd: {}", original_subject)
+    };
+
+    let original_from = get("From").unwrap_or_else(|| "Unknown".to_string());
+    let original_date = get("Date").unwrap_or_else(|| "Unknown".to_string());
+    let original_to = get("To").unwrap_or_else(|| "Unknown".to_string());
+
+    Some(ForwardMetadata {
+        subject,
+        original_from,
+        original_date,
+        original_to,
+        original_body: body.to_string(),
+        thread_id: message.thread_id.clone(),
+        attachments: Vec::new(), // Attachments handled separately
+    })
+}
+
+/// Build the forwarded message body with original message quoted
+pub fn build_forward_body(metadata: &ForwardMetadata, user_message: Option<&str>) -> String {
+    let mut body = String::new();
+
+    // Add user's message if provided
+    if let Some(msg) = user_message {
+        body.push_str(msg);
+        body.push_str("\n\n");
+    }
+
+    // Add forward header
+    body.push_str("---------- Forwarded message ---------\n");
+    body.push_str(&format!("From: {}\n", metadata.original_from));
+    body.push_str(&format!("Date: {}\n", metadata.original_date));
+    body.push_str(&format!("Subject: {}\n", metadata.subject.trim_start_matches("Fwd: ")));
+    body.push_str(&format!("To: {}\n", metadata.original_to));
+    body.push_str("\n");
+    body.push_str(&metadata.original_body);
+
+    body
+}
+
+/// Load an attachment from a file path
+pub fn load_attachment(path: &str) -> std::io::Result<Attachment> {
+    let path = std::path::Path::new(path);
+    let filename = path.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("attachment")
+        .to_string();
+
+    let content = std::fs::read(path)?;
+
+    // Detect MIME type based on file extension
+    let mime_type = match path.extension().and_then(|e| e.to_str()) {
+        Some("pdf") => "application/pdf",
+        Some("doc") => "application/msword",
+        Some("docx") => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        Some("xls") => "application/vnd.ms-excel",
+        Some("xlsx") => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        Some("ppt") => "application/vnd.ms-powerpoint",
+        Some("pptx") => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        Some("txt") => "text/plain",
+        Some("csv") => "text/csv",
+        Some("html") | Some("htm") => "text/html",
+        Some("json") => "application/json",
+        Some("xml") => "application/xml",
+        Some("zip") => "application/zip",
+        Some("tar") => "application/x-tar",
+        Some("gz") | Some("gzip") => "application/gzip",
+        Some("png") => "image/png",
+        Some("jpg") | Some("jpeg") => "image/jpeg",
+        Some("gif") => "image/gif",
+        Some("svg") => "image/svg+xml",
+        Some("webp") => "image/webp",
+        Some("mp3") => "audio/mpeg",
+        Some("mp4") => "video/mp4",
+        Some("mov") => "video/quicktime",
+        Some("avi") => "video/x-msvideo",
+        _ => "application/octet-stream",
+    }.to_string();
+
+    Ok(Attachment {
+        filename,
+        content,
+        mime_type,
+    })
 }

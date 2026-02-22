@@ -1,6 +1,10 @@
 use crate::client::ApiClient;
 use crate::error::Result;
-use super::types::{ValueRange, UpdateValuesResponse, AppendValuesResponse};
+use super::types::{
+    ValueRange, UpdateValuesResponse, AppendValuesResponse,
+    SheetsBatchUpdateRequest, SheetsBatchUpdateResponse, SheetRequest,
+    AddSheetRequest, AddSheetProperties, UpdateSheetPropertiesRequest, UpdateSheetProperties,
+};
 
 pub struct UpdateParams {
     pub spreadsheet_id: String,
@@ -91,4 +95,58 @@ pub async fn clear_values(
 pub fn parse_values_json(json: &str) -> Result<Vec<Vec<serde_json::Value>>> {
     serde_json::from_str(json)
         .map_err(|e| crate::error::WorkspaceError::Config(format!("Invalid JSON values: {}", e)))
+}
+
+/// Add a new sheet (tab) to a spreadsheet
+pub async fn add_sheet(
+    client: &ApiClient,
+    spreadsheet_id: &str,
+    title: &str,
+    index: Option<i64>,
+) -> Result<SheetsBatchUpdateResponse> {
+    let request = SheetsBatchUpdateRequest {
+        requests: vec![
+            SheetRequest {
+                add_sheet: Some(AddSheetRequest {
+                    properties: AddSheetProperties {
+                        title: title.to_string(),
+                        index,
+                    },
+                }),
+                update_sheet_properties: None,
+                delete_sheet: None,
+            },
+        ],
+    };
+
+    let path = format!("/spreadsheets/{}:batchUpdate", spreadsheet_id);
+    client.post(&path, &request).await
+}
+
+/// Rename a sheet (tab) in a spreadsheet
+pub async fn rename_sheet(
+    client: &ApiClient,
+    spreadsheet_id: &str,
+    sheet_id: i64,
+    new_title: &str,
+) -> Result<SheetsBatchUpdateResponse> {
+    let request = SheetsBatchUpdateRequest {
+        requests: vec![
+            SheetRequest {
+                add_sheet: None,
+                update_sheet_properties: Some(UpdateSheetPropertiesRequest {
+                    properties: UpdateSheetProperties {
+                        sheet_id,
+                        title: Some(new_title.to_string()),
+                        index: None,
+                    },
+                    fields: "title".to_string(),
+                }),
+                delete_sheet: None,
+            },
+        ],
+    };
+
+    let path = format!("/spreadsheets/{}:batchUpdate", spreadsheet_id);
+    client.post(&path, &request).await
 }

@@ -132,7 +132,7 @@ impl ApiClient {
 
     /// Get access token
     async fn get_token(&self) -> Result<String, WorkspaceError> {
-        let tm = self.token_manager.read().await;
+        let mut tm = self.token_manager.write().await;
         tm.get_access_token()
             .await
             .map_err(|e| WorkspaceError::Auth(e.to_string()))

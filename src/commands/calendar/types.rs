@@ -17,6 +17,23 @@ pub struct Event {
     pub created: Option<String>,
     pub updated: Option<String>,
     pub recurrence: Option<Vec<String>>,
+    pub reminders: Option<EventReminders>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EventReminders {
+    pub use_default: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub overrides: Vec<ReminderOverride>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReminderOverride {
+    /// Reminder method: "email" or "popup"
+    pub method: String,
+    /// Minutes before the event
+    pub minutes: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
